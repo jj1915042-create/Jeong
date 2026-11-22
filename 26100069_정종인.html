@@ -1,0 +1,2451 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DSP 신호 합성 및 푸리에 변환 분석기</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & Noto Sans KR & JetBrains Mono -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for crisp icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Noto Sans KR"', 'Inter', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom Scrollbar for Scientific Dashboard */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.4);
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(148, 163, 184, 0.7);
+        }
+
+        /* Custom Range Input Styling */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 5px;
+            border-radius: 9999px;
+            outline: none;
+        }
+        .dark input[type="range"] {
+            background: #334155;
+        }
+        html:not(.dark) input[type="range"] {
+            background: #cbd5e1;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            border: 2px solid #ffffff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            transition: transform 0.1s ease;
+        }
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.15);
+            background: #2563eb;
+        }
+
+        /* Canvas container responsiveness */
+        .plot-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            min-height: 210px;
+        }
+        canvas.dsp-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Accordion Smooth Transition */
+        .accordion-content {
+            display: grid;
+            grid-template-rows: 1fr;
+            transition: grid-template-rows 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+            opacity: 1;
+        }
+        .accordion-content.collapsed {
+            grid-template-rows: 0fr;
+            opacity: 0;
+        }
+        .accordion-inner {
+            overflow: hidden;
+        }
+        .accordion-chevron {
+            transition: transform 0.25s ease;
+        }
+        .accordion-header[aria-expanded="false"] .accordion-chevron {
+            transform: rotate(-90deg);
+        }
+
+        /* Desktop Sidebar Collapse Transition */
+        @media (min-width: 1024px) {
+            #control-sidebar {
+                width: 360px;
+                min-width: 360px;
+                transition: margin-left 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+            }
+            #control-sidebar.sidebar-collapsed {
+                margin-left: -376px;
+                opacity: 0;
+                pointer-events: none;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100 font-sans antialiased transition-colors duration-200 selection:bg-blue-500 selection:text-white overflow-x-hidden">
+
+    <!-- Toast Notification Banner (Replaces alert) -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Mobile/Tablet Drawer Backdrop -->
+    <div id="sidebar-backdrop" class="fixed inset-0 z-30 bg-slate-950/60 backdrop-blur-xs hidden lg:hidden transition-opacity"></div>
+
+    <!-- Top Navigation & Quick Action Bar -->
+    <header class="sticky top-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3 sm:px-4 py-2">
+        <div class="max-w-[1920px] mx-auto flex flex-wrap items-center justify-between gap-2.5">
+            <!-- Left: Sidebar Toggle + Brand & Title -->
+            <div class="flex items-center gap-2.5">
+                <button id="btn-sidebar-toggle" class="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 shadow-xs transition flex items-center justify-center" title="제어 사이드바 열기/접기" aria-label="사이드바 토글">
+                    <i id="sidebar-toggle-icon" class="fa-solid fa-bars-staggered text-sm"></i>
+                </button>
+                <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0">
+                    <i class="fa-solid fa-wave-square text-base"></i>
+                </div>
+                <div>
+                    <h1 class="text-sm sm:text-base font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                        DSP 신호 합성 및 푸리에 변환 분석기
+                        <span class="hidden xl:inline-block text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800">FFT & Filter Lab</span>
+                    </h1>
+                </div>
+            </div>
+
+            <!-- Center/Right: Quick Action Bar (Presets, Audio Playback, Export, Theme) -->
+            <div class="flex items-center flex-wrap gap-2">
+                <!-- Quick Presets Bar (Accessible even when sidebar is collapsed) -->
+                <div class="flex items-center bg-slate-100 dark:bg-slate-800/90 p-1 rounded-lg border border-slate-200 dark:border-slate-700 gap-1">
+                    <span class="hidden md:inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400 px-1.5">
+                        <i class="fa-solid fa-bolt text-amber-500"></i> 프리셋:
+                    </span>
+                    <button data-preset="dual-noise" class="quick-preset-btn px-2 py-1 rounded-md text-[11px] font-semibold bg-blue-600 text-white shadow-xs transition" title="15Hz + 60Hz 이중 톤 + 320Hz 고주파 간섭">
+                        이중 톤+노이즈
+                    </button>
+                    <button data-preset="hum-60hz" class="quick-preset-btn px-2 py-1 rounded-md text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 transition" title="20Hz 신호 + 60Hz 전원선 험 노이즈 (Notch 필터 테스트)">
+                        60Hz 험 노이즈
+                    </button>
+                    <button data-preset="am-mod" class="quick-preset-btn px-2 py-1 rounded-md text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 transition" title="반송파 150Hz ± 변조파 15Hz AM 변조">
+                        AM 변조
+                    </button>
+                    <button data-preset="chirp-multi" class="quick-preset-btn px-2 py-1 rounded-md text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 transition" title="시간에 따라 주파수가 변하는 처프(Chirp) 스윕">
+                        처프 스윕
+                    </button>
+                </div>
+
+                <!-- Audio Playback Group -->
+                <div class="flex items-center bg-slate-100 dark:bg-slate-800/90 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <select id="audio-source-select" class="bg-transparent text-xs font-medium px-1.5 py-1 rounded text-slate-700 dark:text-slate-200 focus:outline-none">
+                        <option value="composite" class="dark:bg-slate-800">합성 입력</option>
+                        <option value="filtered" class="dark:bg-slate-800">필터 출력</option>
+                        <option value="clean" class="dark:bg-slate-800">원본 클린</option>
+                    </select>
+                    <button id="btn-play-audio" class="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition">
+                        <i class="fa-solid fa-volume-high"></i>
+                        <span id="btn-play-text">재생</span>
+                    </button>
+                </div>
+
+                <!-- Export Group -->
+                <div class="flex items-center gap-1.5">
+                    <button id="btn-export-csv" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-medium shadow-xs transition" title="시계열 및 FFT 스펙트럼 데이터를 CSV로 다운로드">
+                        <i class="fa-solid fa-file-csv text-blue-500"></i>
+                        <span class="hidden sm:inline">CSV</span>
+                    </button>
+                    <button id="btn-export-png" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-medium shadow-xs transition" title="3단 분석 차트를 고해상도 PNG 이미지로 저장">
+                        <i class="fa-solid fa-image text-indigo-500"></i>
+                        <span class="hidden sm:inline">PNG</span>
+                    </button>
+                </div>
+
+                <!-- Theme Toggle -->
+                <button id="btn-theme-toggle" class="p-2 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shadow-xs transition" title="다크 / 라이트 모드 전환">
+                    <i id="theme-icon" class="fa-solid fa-sun text-amber-400"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Dashboard Container (Flex layout for smooth collapsible sidebar + fluid canvas expansion) -->
+    <main class="max-w-[1920px] mx-auto p-3 sm:p-4 flex flex-col lg:flex-row items-start gap-4 relative">
+        
+        <!-- LEFT COLLAPSIBLE SIDEBAR: Accordion Control Groups -->
+        <aside id="control-sidebar" class="fixed inset-y-0 left-0 z-40 w-[330px] sm:w-[360px] bg-slate-50 dark:bg-slate-950 lg:bg-transparent lg:dark:bg-transparent lg:static lg:z-auto p-3.5 lg:p-0 overflow-y-auto max-h-screen lg:max-h-none border-r border-slate-200 dark:border-slate-800 lg:border-none transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out flex flex-col gap-2.5 shrink-0">
+            
+            <!-- Sidebar Header & Expand/Collapse All Utilities -->
+            <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 px-3 py-2.5 shadow-xs flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-sliders text-blue-500 text-xs"></i>
+                    <span class="text-xs font-bold text-slate-800 dark:text-slate-100">DSP 제어 파라미터</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <button id="btn-expand-all" class="px-2 py-1 rounded text-[11px] font-medium bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition" title="모든 제어 섹션 펼치기">
+                        모두 펼치기
+                    </button>
+                    <button id="btn-collapse-all" class="px-2 py-1 rounded text-[11px] font-medium bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition" title="모든 제어 섹션 접기">
+                        모두 접기
+                    </button>
+                    <button id="btn-close-mobile-sidebar" class="lg:hidden p-1.5 rounded-lg text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800" aria-label="닫기">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- ACCORDION 1: 샘플링 및 FFT 설정 (Sampling & FFT Settings) -->
+            <section class="accordion-card bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+                <button type="button" class="accordion-header w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition" aria-expanded="true">
+                    <div class="flex items-center gap-2">
+                        <span class="w-5 h-5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-[11px]">
+                            <i class="fa-solid fa-clock"></i>
+                        </span>
+                        <span class="text-xs font-bold text-slate-800 dark:text-slate-100">1. 샘플링 및 FFT 설정</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="badge-sampling" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800/60">1000Hz · 1.0s</span>
+                        <i class="fa-solid fa-chevron-down text-[11px] text-slate-400 accordion-chevron"></i>
+                    </div>
+                </button>
+                <div class="accordion-content">
+                    <div class="accordion-inner">
+                        <div class="px-3.5 pb-3.5 pt-1 border-t border-slate-100 dark:border-slate-800/80 space-y-3">
+                            <!-- Sampling Rate Fs -->
+                            <div>
+                                <div class="flex justify-between items-center text-xs mb-1">
+                                    <label for="fs-slider" class="font-medium text-slate-700 dark:text-slate-300">샘플링 주파수 (Fs)</label>
+                                    <div class="flex items-center gap-1">
+                                        <input type="number" id="fs-num" min="500" max="4000" step="100" value="1000" class="w-16 px-1.5 py-0.5 text-right font-mono text-xs rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 focus:outline-none focus:border-blue-500">
+                                        <span class="text-[11px] font-mono text-slate-500">Hz</span>
+                                    </div>
+                                </div>
+                                <input type="range" id="fs-slider" min="500" max="4000" step="100" value="1000" class="w-full">
+                                <div class="flex justify-between text-[10px] text-slate-400 font-mono mt-0.5">
+                                    <span>나이퀴스트 (Fs/2): <strong id="nyquist-display" class="text-blue-500">500 Hz</strong></span>
+                                    <span>N = <strong id="samples-display">1000</strong></span>
+                                </div>
+                            </div>
+
+                            <!-- Duration T -->
+                            <div>
+                                <div class="flex justify-between items-center text-xs mb-1">
+                                    <label for="duration-slider" class="font-medium text-slate-700 dark:text-slate-300">신호 지속 시간 (T)</label>
+                                    <div class="flex items-center gap-1">
+                                        <input type="number" id="duration-num" min="0.5" max="2.0" step="0.1" value="1.0" class="w-16 px-1.5 py-0.5 text-right font-mono text-xs rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 focus:outline-none focus:border-blue-500">
+                                        <span class="text-[11px] font-mono text-slate-500">초</span>
+                                    </div>
+                                </div>
+                                <input type="range" id="duration-slider" min="0.5" max="2.0" step="0.1" value="1.0" class="w-full">
+                            </div>
+
+                            <!-- Window Function for FFT -->
+                            <div class="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex flex-col gap-1">
+                                <label for="window-type" class="text-xs font-medium text-slate-700 dark:text-slate-300">FFT 윈도우 함수 (스펙트럼 누설 방지)</label>
+                                <select id="window-type" class="w-full text-xs px-2 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-medium focus:outline-none focus:border-blue-500">
+                                    <option value="rect">Rectangular (사각창 - 진폭 정확)</option>
+                                    <option value="hann">Hann Window (해닝창 - 누설 억제)</option>
+                                    <option value="hamming">Hamming Window (해밍창)</option>
+                                    <option value="blackman">Blackman Window (블랙맨창)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ACCORDION 2: 목표 신호 성분 (Target Signal Components) -->
+            <section class="accordion-card bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+                <button type="button" class="accordion-header w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition" aria-expanded="true">
+                    <div class="flex items-center gap-2">
+                        <span class="w-5 h-5 rounded-md bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 flex items-center justify-center text-[11px]">
+                            <i class="fa-solid fa-wave-square"></i>
+                        </span>
+                        <span class="text-xs font-bold text-slate-800 dark:text-slate-100">2. 목표 신호 성분</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="badge-signals" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-300 border border-blue-200/70 dark:border-blue-800/60">15Hz + 60Hz</span>
+                        <i class="fa-solid fa-chevron-down text-[11px] text-slate-400 accordion-chevron"></i>
+                    </div>
+                </button>
+                <div class="accordion-content">
+                    <div class="accordion-inner">
+                        <div class="px-3.5 pb-3.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 space-y-2.5">
+                            <!-- Component 1 (Low Freq Target) -->
+                            <div class="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <label class="flex items-center gap-2 text-xs font-bold text-blue-600 dark:text-blue-400 cursor-pointer">
+                                        <input type="checkbox" id="c1-enable" checked class="rounded text-blue-600 focus:ring-blue-500">
+                                        <span>신호 1 (기본 성분)</span>
+                                    </label>
+                                    <select id="c1-wave" class="text-[11px] px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600">
+                                        <option value="sine">사인파 (Sine)</option>
+                                        <option value="cosine">코사인파 (Cosine)</option>
+                                        <option value="square">구형파 (Square)</option>
+                                        <option value="sawtooth">톱니파 (Sawtooth)</option>
+                                        <option value="chirp">처프 스윕 (Chirp)</option>
+                                    </select>
+                                </div>
+                                <div class="grid grid-cols-12 gap-1.5 items-center text-xs">
+                                    <span class="col-span-3 text-slate-600 dark:text-slate-400">주파수</span>
+                                    <input type="range" id="c1-freq-slider" min="1" max="500" step="1" value="15" class="col-span-6">
+                                    <div class="col-span-3 flex items-center justify-end gap-0.5">
+                                        <input type="number" id="c1-freq-num" min="1" max="1500" value="15" class="w-12 px-1 py-0.5 text-right font-mono text-[11px] rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
+                                        <span class="text-[10px] text-slate-400">Hz</span>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-12 gap-1.5 items-center text-xs">
+                                    <span class="col-span-3 text-slate-600 dark:text-slate-400">진폭 (A₁)</span>
+                                    <input type="range" id="c1-amp-slider" min="0" max="5" step="0.1" value="1.5" class="col-span-6">
+                                    <div class="col-span-3 flex items-center justify-end gap-0.5">
+                                        <input type="number" id="c1-amp-num" min="0" max="10" step="0.1" value="1.5" class="w-12 px-1 py-0.5 text-right font-mono text-[11px] rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
+                                        <span class="text-[10px] text-slate-400">V</span>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-12 gap-1.5 items-center text-xs">
+                                    <span class="col-span-3 text-slate-600 dark:text-slate-400">위상 (φ₁)</span>
+                                    <input type="range" id="c1-phase-slider" min="-180" max="180" step="5" value="0" class="col-span-6">
+                                    <div class="col-span-3 flex items-center justify-end gap-0.5">
+                                        <input type="number" id="c1-phase-num" min="-180" max="180" step="5" value="0" class="w-12 px-1 py-0.5 text-right font-mono text-[11px] rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
+                                        <span class="text-[10px] text-slate-400">°</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Component 2 (Mid Freq Target) -->
+                            <div class="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <label class="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 cursor-pointer">
+                                        <input type="checkbox" id="c2-enable" checked class="rounded text-emerald-600 focus:ring-emerald-500">
+                                        <span>신호 2 (보조 성분)</span>
+                                    </label>
+                                    <select id="c2-wave" class="text-[11px] px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600">
+                                        <option value="sine">사인파 (Sine)</option>
+                                        <option value="cosine">코사인파 (Cosine)</option>
+                                        <option value="square">구형파 (Square)</option>
+                                        <option value="sawtooth">톱니파 (Sawtooth)</option>
+                                        <option value="chirp">처프 스윕 (Chirp)</option>
+                                    </select>
+                                </div>
+                                <div class="grid grid-cols-12 gap-1.5 items-center text-xs">
+                                    <span class="col-span-3 text-slate-600 dark:text-slate-400">주파수</span>
+                                    <input type="range" id="c2-freq-slider" min="1" max="500" step="1" value="60" class="col-span-6">
+                                    <div class="col-span-3 flex items-center justify-end gap-0.5">
+                                        <input type="number" id="c2-freq-num" min="1" max="1500" value="60" class="w-12 px-1 py-0.5 text-right font-mono text-[11px] rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
+                                        <span class="text-[10px] text-slate-400">Hz</span>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-12 gap-1.5 items-center text-xs">
+                                    <span class="col-span-3 text-slate-600 dark:text-slate-400">진폭 (A₂)</span>
+                                    <input type="range" id="c2-amp-slider" min="0" max="5" step="0.1" value="0.9" class="col-span-6">
+                                    <div class="col-span-3 flex items-center justify-end gap-0.5">
+                                        <input type="number" id="c2-amp-num" min="0" max="10" step="0.1" value="0.9" class="w-12 px-1 py-0.5 text-right font-mono text-[11px] rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
+                                        <span class="text-[10px] text-slate-400">V</span>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-12 gap-1.5 items-center text-xs">
+                                    <span class="col-span-3 text-slate-600 dark:text-slate-400">위상 (φ₂)</span>
+                                    <input type="range" id="c2-phase-slider" min="-180" max="180" step="5" value="30" class="col-span-6">
+                                    <div class="col-span-3 flex items-center justify-end gap-0.5">
+                                        <input type="number" id="c2-phase-num" min="-180" max="180" step="5" value="30" class="w-12 px-1 py-0.5 text-right font-mono text-[11px] rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
+                                        <span class="text-[10px] text-slate-400">°</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ACCORDION 3: 간섭 및 노이즈 (Interference & Noise) -->
+            <section class="accordion-card bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+                <button type="button" class="accordion-header w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition" aria-expanded="true">
+                    <div class="flex items-center gap-2">
+                        <span class="w-5 h-5 rounded-md bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-400 flex items-center justify-center text-[11px]">
+                            <i class="fa-solid fa-bolt"></i>
+                        </span>
+                        <span class="text-xs font-bold text-slate-800 dark:text-slate-100">3. 간섭 및 노이즈</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="badge-noise" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 border border-rose-200/70 dark:border-rose-800/60">320Hz · σ=0.35</span>
+                        <i class="fa-solid fa-chevron-down text-[11px] text-slate-400 accordion-chevron"></i>
+                    </div>
+                </button>
+                <div class="accordion-content">
+                    <div class="accordion-inner">
+                        <div class="px-3.5 pb-3.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 space-y-2.5">
+                            <div class="flex items-center justify-between">
+                                <label class="flex items-center gap-2 text-xs font-bold text-rose-600 dark:text-rose-400 cursor-pointer">
+                                    <input type="checkbox" id="c3-enable" checked class="rounded text-rose-600 focus:ring-rose-500">
+                                    <span>고주파 간섭 및 백색잡음 활성화</span>
+                                </label>
+                                <button id="btn-reseed-noise" class="text-[10px] px-2 py-0.5 rounded bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300 hover:bg-rose-200 transition" title="가우시안 난수 시드 재생성">
+                                    <i class="fa-solid fa-dice"></i> 시드 갱신
+                                </button>
+                            </div>
+                            <div class="grid grid-cols-12 gap-1.5 items-center text-xs">
+                                <span class="col-span-3 text-slate-600 dark:text-slate-400">간섭 주파수</span>
+                                <input type="range" id="c3-freq-slider" min="20" max="1000" step="5" value="320" class="col-span-6">
+                                <div class="col-span-3 flex items-center justify-end gap-0.5">
+                                    <input type="number" id="c3-freq-num" min="10" max="1900" value="320" class="w-12 px-1 py-0.5 text-right font-mono text-[11px] rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700">
+                                    <span class="text-[10px] text-slate-400">Hz</span>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-12 gap-1.5 items-center text-xs">
+                                <span class="col-span-3 text-slate-600 dark:text-slate-400">간섭 진폭</span>
+                                <input type="range" id="c3-amp-slider" min="0" max="3" step="0.1" value="0.6" class="col-span-6">
+                                <div class="col-span-3 flex items-center justify-end gap-0.5">
+                                    <input type="number" id="c3-amp-num" min="0" max="10" step="0.1" value="0.6" class="w-12 px-1 py-0.5 text-right font-mono text-[11px] rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700">
+                                    <span class="text-[10px] text-slate-400">V</span>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-12 gap-1.5 items-center text-xs">
+                                <span class="col-span-3 text-slate-600 dark:text-slate-400">백색잡음(σ)</span>
+                                <input type="range" id="noise-sigma-slider" min="0" max="1.5" step="0.05" value="0.35" class="col-span-6">
+                                <div class="col-span-3 flex items-center justify-end gap-0.5">
+                                    <input type="number" id="noise-sigma-num" min="0" max="5" step="0.05" value="0.35" class="w-12 px-1 py-0.5 text-right font-mono text-[11px] rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700">
+                                    <span class="text-[10px] text-slate-400">σ</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ACCORDION 4: 디지털 필터 설계 (Digital Filter Design) -->
+            <section class="accordion-card bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+                <button type="button" class="accordion-header w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition" aria-expanded="true">
+                    <div class="flex items-center gap-2">
+                        <span class="w-5 h-5 rounded-md bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400 flex items-center justify-center text-[11px]">
+                            <i class="fa-solid fa-filter"></i>
+                        </span>
+                        <span class="text-xs font-bold text-slate-800 dark:text-slate-100">4. 디지털 필터 설계</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="badge-filter" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-300 border border-amber-200/70 dark:border-amber-800/60">LPF · 100Hz</span>
+                        <i class="fa-solid fa-chevron-down text-[11px] text-slate-400 accordion-chevron"></i>
+                    </div>
+                </button>
+                <div class="accordion-content">
+                    <div class="accordion-inner">
+                        <div class="px-3.5 pb-3.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 space-y-2.5">
+                            <!-- Enable Filter Switch -->
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs font-semibold text-slate-700 dark:text-slate-200">필터링 적용 (ON / OFF)</span>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="filter-enable" checked class="sr-only peer">
+                                    <div class="relative w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                                </label>
+                            </div>
+
+                            <div id="filter-controls-body" class="space-y-2.5 transition-opacity">
+                                <!-- Filter Type & Implementation -->
+                                <div class="grid grid-cols-1 gap-2">
+                                    <div>
+                                        <label class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">필터 응답 유형</label>
+                                        <select id="filter-type" class="w-full text-xs px-2 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-medium">
+                                            <option value="lowpass">저역통과 (Low-pass)</option>
+                                            <option value="highpass">고역통과 (High-pass)</option>
+                                            <option value="bandpass">대역통과 (Band-pass)</option>
+                                            <option value="bandstop">대역저지 (Band-stop / Notch)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">필터 차수 (롤오프 경사)</label>
+                                        <select id="filter-order" class="w-full text-xs px-2 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-medium">
+                                            <option value="2">2차 버터워스 (-12 dB/oct)</option>
+                                            <option value="4" selected>4차 버터워스 (-24 dB/oct)</option>
+                                            <option value="6">6차 버터워스 (-36 dB/oct)</option>
+                                            <option value="8">8차 버터워스 (-48 dB/oct)</option>
+                                            <option value="ideal">이상적 주파수 영역 필터 (Brick-wall)</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Primary Cutoff Frequency -->
+                                <div>
+                                    <div class="flex justify-between items-center text-xs mb-1">
+                                        <label id="cutoff1-label" class="font-medium text-slate-700 dark:text-slate-300">차단 주파수 (fc)</label>
+                                        <div class="flex items-center gap-1">
+                                            <input type="number" id="filter-fc1-num" min="5" max="1500" value="100" class="w-16 px-1.5 py-0.5 text-right font-mono text-xs rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700">
+                                            <span class="text-[11px] font-mono text-slate-500">Hz</span>
+                                        </div>
+                                    </div>
+                                    <input type="range" id="filter-fc1-slider" min="5" max="500" step="1" value="100" class="w-full">
+                                </div>
+
+                                <!-- Secondary Cutoff Frequency (Shown for Band-pass / Band-stop) -->
+                                <div id="cutoff2-container" class="hidden">
+                                    <div class="flex justify-between items-center text-xs mb-1">
+                                        <label class="font-medium text-slate-700 dark:text-slate-300">상한 차단 주파수 (fc₂)</label>
+                                        <div class="flex items-center gap-1">
+                                            <input type="number" id="filter-fc2-num" min="10" max="1800" value="180" class="w-16 px-1.5 py-0.5 text-right font-mono text-xs rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700">
+                                            <span class="text-[11px] font-mono text-slate-500">Hz</span>
+                                        </div>
+                                    </div>
+                                    <input type="range" id="filter-fc2-slider" min="10" max="500" step="1" value="180" class="w-full">
+                                </div>
+
+                                <!-- Zero-Phase Filtfilt Toggle -->
+                                <div class="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800">
+                                    <label class="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer" title="순방향 및 역방향 이중 필터링으로 위상 지연(Phase Delay)을 0으로 보정합니다 (Python scipy.signal.filtfilt와 동일)">
+                                        <input type="checkbox" id="filter-zerophase" checked class="rounded text-amber-500 focus:ring-amber-500">
+                                        <span>영위상 필터링 (Zero-Phase `filtfilt`)</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </aside>
+
+        <!-- RIGHT MAIN AREA: Fluid Full-Width Visualization Workspace -->
+        <div class="flex-1 w-full min-w-0 flex flex-col gap-3.5">
+            
+            <!-- Quantitative Metrics Bar -->
+            <section class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <!-- Metric 1: Detected Peak Frequencies -->
+                <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3 shadow-sm">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                        <span>검출된 주요 피크 주파수</span>
+                        <i class="fa-solid fa-mountain text-blue-500"></i>
+                    </div>
+                    <div id="metric-peaks" class="mt-1 font-mono text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate">
+                        15.0 Hz, 60.0 Hz
+                    </div>
+                    <div id="metric-peak-mags" class="text-[10px] font-mono text-slate-400 truncate mt-0.5">
+                        최대 진폭: 1.50 V
+                    </div>
+                </div>
+
+                <!-- Metric 2: RMS Amplitude -->
+                <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3 shadow-sm">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                        <span>실효값 진폭 (RMS)</span>
+                        <i class="fa-solid fa-bolt text-emerald-500"></i>
+                    </div>
+                    <div class="mt-1 flex items-baseline gap-2">
+                        <span id="metric-rms-filtered" class="font-mono text-sm sm:text-base font-bold text-emerald-600 dark:text-emerald-400">1.24 V</span>
+                        <span id="metric-rms-raw" class="font-mono text-xs text-slate-400">(원본: 1.36 V)</span>
+                    </div>
+                    <div class="text-[10px] text-slate-400 mt-0.5">필터 출력 대 합성 입력 실효치</div>
+                </div>
+
+                <!-- Metric 3: SNR Improvement -->
+                <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3 shadow-sm">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                        <span>신호 대 잡음비 (SNR 개선)</span>
+                        <i class="fa-solid fa-signal text-amber-500"></i>
+                    </div>
+                    <div class="mt-1 flex items-baseline gap-2">
+                        <span id="metric-snr-out" class="font-mono text-sm sm:text-base font-bold text-amber-600 dark:text-amber-400">+18.4 dB</span>
+                        <span id="metric-snr-in" class="font-mono text-xs text-slate-400">(입력: +5.2 dB)</span>
+                    </div>
+                    <div id="metric-snr-gain" class="text-[10px] font-mono text-emerald-500 mt-0.5">이득: +13.2 dB 향상</div>
+                </div>
+
+                <!-- Metric 4: MSE & THD -->
+                <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3 shadow-sm">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                        <span>복원 오차 (MSE) / THD</span>
+                        <i class="fa-solid fa-bullseye text-indigo-500"></i>
+                    </div>
+                    <div class="mt-1 flex items-baseline gap-2">
+                        <span id="metric-mse" class="font-mono text-sm sm:text-base font-bold text-indigo-600 dark:text-indigo-400">0.0142</span>
+                        <span id="metric-thd" class="font-mono text-xs text-slate-400">THD: 4.1%</span>
+                    </div>
+                    <div class="text-[10px] text-slate-400 mt-0.5">클린 목표 신호 대비 평균 제곱 오차</div>
+                </div>
+            </section>
+
+            <!-- 3-PANEL MATPLOTLIB VISUALIZATION STACK -->
+            <div id="charts-export-container" class="flex flex-col gap-3.5">
+                
+                <!-- SUBPLOT 1 (TOP): Time-Domain Composite Signal View -->
+                <section class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 shadow-sm flex flex-col">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-mono text-[11px] font-bold">Subplot 1</span>
+                            <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">시간 영역 합성 신호 (Time-Domain Composite Signal)</h3>
+                        </div>
+                        
+                        <!-- Time Window Zoom / Pan & Overlay Controls -->
+                        <div class="flex flex-wrap items-center gap-3 text-xs">
+                            <label class="flex items-center gap-1.5 cursor-pointer text-slate-600 dark:text-slate-300">
+                                <input type="checkbox" id="plot1-show-clean" class="rounded text-emerald-500">
+                                <span>클린 신호 중첩</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 cursor-pointer text-slate-600 dark:text-slate-300">
+                                <input type="checkbox" id="plot1-show-filtered" class="rounded text-amber-500">
+                                <span>필터 출력 중첩</span>
+                            </label>
+                            <div class="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700">
+                                <span class="text-[11px] text-slate-500">시간창(Zoom):</span>
+                                <input type="range" id="time-zoom-slider" min="0.1" max="1.0" step="0.05" value="0.4" class="w-20">
+                                <span id="time-zoom-val" class="font-mono text-[11px] w-10 text-right">0.40s</span>
+                            </div>
+                            <div class="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700">
+                                <span class="text-[11px] text-slate-500">이동(Pan):</span>
+                                <input type="range" id="time-pan-slider" min="0" max="1" step="0.01" value="0" class="w-16">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="plot-wrapper h-[220px] sm:h-[240px]">
+                        <canvas id="canvas-time-raw" class="dsp-canvas"></canvas>
+                        <div id="tooltip-plot1" class="pointer-events-none hidden absolute z-20 px-2.5 py-1.5 rounded-lg bg-slate-900/95 text-white text-[11px] font-mono shadow-lg border border-slate-700"></div>
+                    </div>
+                </section>
+
+                <!-- SUBPLOT 2 (MIDDLE): Frequency-Domain Spectrum (FFT Magnitude) -->
+                <section class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 shadow-sm flex flex-col">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-mono text-[11px] font-bold">Subplot 2</span>
+                            <h3 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">주파수 영역 스펙트럼 (FFT Magnitude Spectrum)</h3>
+                        </div>
+                        
+                        <!-- FFT Display Options -->
+                        <div class="flex flex-wrap items-center gap-3 text-xs">
+                            <label class="flex items-center gap-1.5 cursor-pointer text-slate-600 dark:text-slate-300">
+                                <input type="checkbox" id="fft-show-filtered" checked class="rounded text-amber-500">
+                                <span>필터링 후 스펙트럼 비교</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 cursor-pointer text-slate-600 dark:text-slate-300">
+                                <input type="checkbox" id="fft-show-response" checked class="rounded text-rose-500">
+                                <span>필터 주파수 응답 곡선</span>
+                            </label>
+                            <div class="inline-flex rounded-md bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700">
+                                <button id="btn-fft-linear" class="px-2 py-0.5 rounded text-[11px] font-semibold bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-300 shadow-sm">선형 진폭 (V)</button>
+                                <button id="btn-fft-db" class="px-2 py-0.5 rounded text-[11px] font-medium text-slate-600 dark:text-slate-400">데시벨 (dB)</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="plot-wrapper h-[220px] sm:h-[240px]">
+                        <canvas id="canvas-fft" class="dsp-canvas"></canvas>
+                        <div id="tooltip-plot2" class="pointer-events-none hidden absolute z-20 px-2.5 py-1.5 rounded-lg bg-slate-900/95 text-white text-[11px] font-mono shadow-lg border border-slate-700"></div>
+                    </div>
+                </section>
+
+                <!-- SUBPLOT 3 (BOTTOM): Filtered / Reconstructed Signal OR Phase / Spectrogram Tab -->
+                <section class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 shadow-sm flex flex-col">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-mono text-[11px] font-bold">Subplot 3</span>
+                            <h3 id="plot3-title" class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">디지털 필터 복원 신호 vs 원본 클린 신호 (Reconstructed Signal)</h3>
+                        </div>
+                        
+                        <!-- Tab Switcher for Subplot 3 -->
+                        <div class="flex items-center gap-2">
+                            <div class="inline-flex rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 text-xs">
+                                <button data-tab="reconstructed" class="plot3-tab px-2.5 py-1 rounded-md font-semibold bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-300 shadow-sm transition">
+                                    필터 복원 파형
+                                </button>
+                                <button data-tab="phase" class="plot3-tab px-2.5 py-1 rounded-md font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">
+                                    위상 스펙트럼 (Phase)
+                                </button>
+                                <button data-tab="spectrogram" class="plot3-tab px-2.5 py-1 rounded-md font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">
+                                    스펙트로그램 (STFT)
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="plot-wrapper h-[220px] sm:h-[240px]">
+                        <canvas id="canvas-bottom" class="dsp-canvas"></canvas>
+                        <div id="tooltip-plot3" class="pointer-events-none hidden absolute z-20 px-2.5 py-1.5 rounded-lg bg-slate-900/95 text-white text-[11px] font-mono shadow-lg border border-slate-700"></div>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- DSP Engine & Interactive Visualization Script -->
+    <script>
+        /**
+         * ============================================================================
+         * 1. DSP MATHEMATICAL ENGINE (FFT, Windowing, Biquad / Ideal Filters, Metrics)
+         * ============================================================================
+         */
+        class DSPEngine {
+            /**
+             * Radix-2 Cooley-Tukey Fast Fourier Transform (In-place)
+             * Zero-pads input automatically to the next power of 2 for arbitrary N.
+             */
+            static computeFFT(signal, windowType = 'rect') {
+                const N = signal.length;
+                // Find next power of 2
+                let nFFT = 1;
+                while (nFFT < N) nFFT <<= 1;
+
+                const real = new Float64Array(nFFT);
+                const imag = new Float64Array(nFFT);
+
+                // Apply window function & calculate coherent gain compensation
+                let windowSum = 0;
+                for (let i = 0; i < N; i++) {
+                    let w = 1.0;
+                    if (windowType === 'hann') {
+                        w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (N - 1)));
+                    } else if (windowType === 'hamming') {
+                        w = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (N - 1));
+                    } else if (windowType === 'blackman') {
+                        w = 0.42 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1)) + 0.08 * Math.cos((4 * Math.PI * i) / (N - 1));
+                    }
+                    real[i] = signal[i] * w;
+                    windowSum += w;
+                }
+
+                const coherentGain = windowSum / N;
+
+                // Bit-reversal permutation
+                let j = 0;
+                for (let i = 0; i < nFFT - 1; i++) {
+                    if (i < j) {
+                        const tempR = real[i];
+                        real[i] = real[j];
+                        real[j] = tempR;
+                    }
+                    let k = nFFT >> 1;
+                    while (k <= j) {
+                        j -= k;
+                        k >>= 1;
+                    }
+                    j += k;
+                }
+
+                // Butterfly computations
+                for (let len = 2; len <= nFFT; len <<= 1) {
+                    const halfLen = len >> 1;
+                    const angleStep = (-2 * Math.PI) / len;
+                    const wStepR = Math.cos(angleStep);
+                    const wStepI = Math.sin(angleStep);
+
+                    for (let i = 0; i < nFFT; i += len) {
+                        let wR = 1.0;
+                        let wI = 0.0;
+                        for (let k = 0; k < halfLen; k++) {
+                            const evenIdx = i + k;
+                            const oddIdx = evenIdx + halfLen;
+
+                            const tR = wR * real[oddIdx] - wI * imag[oddIdx];
+                            const tI = wR * imag[oddIdx] + wI * real[oddIdx];
+
+                            real[oddIdx] = real[evenIdx] - tR;
+                            imag[oddIdx] = imag[evenIdx] - tI;
+                            real[evenIdx] += tR;
+                            imag[evenIdx] += tI;
+
+                            const nextWR = wR * wStepR - wI * wStepI;
+                            wI = wR * wStepI + wI * wStepR;
+                            wR = nextWR;
+                        }
+                    }
+                }
+
+                // Single-sided spectrum (0 to Nyquist Fs/2)
+                const halfN = Math.floor(nFFT / 2) + 1;
+                const magnitudes = new Float64Array(halfN);
+                const magnitudesDB = new Float64Array(halfN);
+                const phases = new Float64Array(halfN);
+
+                for (let i = 0; i < halfN; i++) {
+                    const re = real[i];
+                    const im = imag[i];
+                    let mag = Math.sqrt(re * re + im * im) / (N * coherentGain);
+                    // Double non-DC and non-Nyquist components for single-sided amplitude
+                    if (i > 0 && i < nFFT / 2) {
+                        mag *= 2.0;
+                    }
+                    magnitudes[i] = mag;
+                    magnitudesDB[i] = 20 * Math.log10(Math.max(mag, 1e-7));
+                    phases[i] = mag > 1e-3 ? (Math.atan2(im, re) * 180) / Math.PI : 0;
+                }
+
+                return { nFFT, halfN, magnitudes, magnitudesDB, phases, real, imag };
+            }
+
+            /**
+             * Cascaded Biquad IIR Butterworth Filter (2nd, 4th, 6th, 8th order) + Zero-Phase `filtfilt`
+             * or Ideal Brick-Wall Frequency Domain Filter
+             */
+            static applyDigitalFilter(signal, fs, config) {
+                if (!config.enabled) {
+                    return new Float64Array(signal);
+                }
+
+                const nyquist = fs / 2;
+                const fc1 = Math.min(Math.max(config.fc1, 1), nyquist - 1);
+                const fc2 = Math.min(Math.max(config.fc2, fc1 + 2), nyquist - 1);
+
+                // Ideal Frequency Domain Brick-wall Filter
+                if (config.order === 'ideal') {
+                    return this.applyIdealFFTFilter(signal, fs, config.type, fc1, fc2);
+                }
+
+                const order = parseInt(config.order, 10) || 4;
+                const numStages = Math.max(1, Math.floor(order / 2));
+                let output = new Float64Array(signal);
+
+                for (let s = 0; s < numStages; s++) {
+                    // Butterworth Q-factor for cascaded 2nd-order sections
+                    const poleAngle = (Math.PI * (2 * s + 1)) / (2 * order);
+                    const Q = 1 / (2 * Math.sin(poleAngle));
+
+                    if (config.type === 'lowpass') {
+                        const coeffs = this.calcBiquadCoeffs('lowpass', fs, fc1, Q);
+                        output = this.runBiquad(output, coeffs, config.zeroPhase);
+                    } else if (config.type === 'highpass') {
+                        const coeffs = this.calcBiquadCoeffs('highpass', fs, fc1, Q);
+                        output = this.runBiquad(output, coeffs, config.zeroPhase);
+                    } else if (config.type === 'bandpass') {
+                        // Cascade Highpass(fc1) and Lowpass(fc2) for clean wide/narrow bandpass
+                        const hpCoeffs = this.calcBiquadCoeffs('highpass', fs, fc1, Q);
+                        const lpCoeffs = this.calcBiquadCoeffs('lowpass', fs, fc2, Q);
+                        output = this.runBiquad(output, hpCoeffs, config.zeroPhase);
+                        output = this.runBiquad(output, lpCoeffs, config.zeroPhase);
+                    } else if (config.type === 'bandstop') {
+                        const centerFreq = Math.sqrt(fc1 * fc2);
+                        const bw = Math.max(fc2 - fc1, 2);
+                        const notchQ = centerFreq / bw;
+                        const coeffs = this.calcBiquadCoeffs('notch', fs, centerFreq, notchQ);
+                        output = this.runBiquad(output, coeffs, config.zeroPhase);
+                    }
+                }
+
+                return output;
+            }
+
+            static calcBiquadCoeffs(type, fs, f0, Q) {
+                const w0 = (2 * Math.PI * f0) / fs;
+                const cosW0 = Math.cos(w0);
+                const sinW0 = Math.sin(w0);
+                const alpha = sinW0 / (2 * Q);
+
+                let b0, b1, b2, a0, a1, a2;
+
+                if (type === 'lowpass') {
+                    b0 = (1 - cosW0) / 2;
+                    b1 = 1 - cosW0;
+                    b2 = (1 - cosW0) / 2;
+                    a0 = 1 + alpha;
+                    a1 = -2 * cosW0;
+                    a2 = 1 - alpha;
+                } else if (type === 'highpass') {
+                    b0 = (1 + cosW0) / 2;
+                    b1 = -(1 + cosW0);
+                    b2 = (1 + cosW0) / 2;
+                    a0 = 1 + alpha;
+                    a1 = -2 * cosW0;
+                    a2 = 1 - alpha;
+                } else if (type === 'notch') {
+                    b0 = 1;
+                    b1 = -2 * cosW0;
+                    b2 = 1;
+                    a0 = 1 + alpha;
+                    a1 = -2 * cosW0;
+                    a2 = 1 - alpha;
+                }
+
+                return {
+                    b0: b0 / a0,
+                    b1: b1 / a0,
+                    b2: b2 / a0,
+                    a1: a1 / a0,
+                    a2: a2 / a0
+                };
+            }
+
+            static runBiquad(input, c, zeroPhase) {
+                const N = input.length;
+                const forward = new Float64Array(N);
+
+                // Pad initial state with first sample to prevent startup transient spike
+                let x1 = input[0], x2 = input[0];
+                let y1 = input[0], y2 = input[0];
+
+                for (let i = 0; i < N; i++) {
+                    const x0 = input[i];
+                    const y0 = c.b0 * x0 + c.b1 * x1 + c.b2 * x2 - c.a1 * y1 - c.a2 * y2;
+                    forward[i] = y0;
+                    x2 = x1; x1 = x0;
+                    y2 = y1; y1 = y0;
+                }
+
+                if (!zeroPhase) return forward;
+
+                // Backward pass for Zero-Phase response
+                const backward = new Float64Array(N);
+                x1 = forward[N - 1]; x2 = forward[N - 1];
+                y1 = forward[N - 1]; y2 = forward[N - 1];
+
+                for (let i = N - 1; i >= 0; i--) {
+                    const x0 = forward[i];
+                    const y0 = c.b0 * x0 + c.b1 * x1 + c.b2 * x2 - c.a1 * y1 - c.a2 * y2;
+                    backward[i] = y0;
+                    x2 = x1; x1 = x0;
+                    y2 = y1; y1 = y0;
+                }
+
+                return backward;
+            }
+
+            static applyIdealFFTFilter(signal, fs, type, fc1, fc2) {
+                const N = signal.length;
+                let nFFT = 1;
+                while (nFFT < N) nFFT <<= 1;
+
+                const real = new Float64Array(nFFT);
+                const imag = new Float64Array(nFFT);
+                for (let i = 0; i < N; i++) real[i] = signal[i];
+
+                // Forward FFT
+                this.fftTransform(real, imag, false);
+
+                // Zero out rejected frequency bins
+                for (let k = 0; k < nFFT; k++) {
+                    const freq = k <= nFFT / 2 ? (k * fs) / nFFT : ((nFFT - k) * fs) / nFFT;
+                    let keep = true;
+                    if (type === 'lowpass') keep = freq <= fc1;
+                    else if (type === 'highpass') keep = freq >= fc1;
+                    else if (type === 'bandpass') keep = freq >= fc1 && freq <= fc2;
+                    else if (type === 'bandstop') keep = freq < fc1 || freq > fc2;
+
+                    if (!keep) {
+                        real[k] = 0;
+                        imag[k] = 0;
+                    }
+                }
+
+                // Inverse FFT
+                this.fftTransform(real, imag, true);
+                const out = new Float64Array(N);
+                for (let i = 0; i < N; i++) out[i] = real[i];
+                return out;
+            }
+
+            static fftTransform(real, imag, inverse) {
+                const n = real.length;
+                let j = 0;
+                for (let i = 0; i < n - 1; i++) {
+                    if (i < j) {
+                        [real[i], real[j]] = [real[j], real[i]];
+                        [imag[i], imag[j]] = [imag[j], imag[i]];
+                    }
+                    let k = n >> 1;
+                    while (k <= j) { j -= k; k >>= 1; }
+                    j += k;
+                }
+
+                for (let len = 2; len <= n; len <<= 1) {
+                    const halfLen = len >> 1;
+                    const angle = ((inverse ? 2 : -2) * Math.PI) / len;
+                    const wStepR = Math.cos(angle);
+                    const wStepI = Math.sin(angle);
+                    for (let i = 0; i < n; i += len) {
+                        let wR = 1, wI = 0;
+                        for (let k = 0; k < halfLen; k++) {
+                            const e = i + k, o = e + halfLen;
+                            const tR = wR * real[o] - wI * imag[o];
+                            const tI = wR * imag[o] + wI * real[o];
+                            real[o] = real[e] - tR;
+                            imag[o] = imag[e] - tI;
+                            real[e] += tR;
+                            imag[e] += tI;
+                            const nextWR = wR * wStepR - wI * wStepI;
+                            wI = wR * wStepI + wI * wStepR;
+                            wR = nextWR;
+                        }
+                    }
+                }
+                if (inverse) {
+                    for (let i = 0; i < n; i++) {
+                        real[i] /= n;
+                        imag[i] /= n;
+                    }
+                }
+            }
+
+            /**
+             * Compute theoretical Filter Magnitude Response |H(f)| for overlay on FFT plot
+             */
+            static getFilterMagnitudeResponse(freqs, fs, config) {
+                const resp = new Float64Array(freqs.length);
+                if (!config.enabled) {
+                    resp.fill(1.0);
+                    return resp;
+                }
+
+                const nyquist = fs / 2;
+                const fc1 = Math.min(Math.max(config.fc1, 1), nyquist - 1);
+                const fc2 = Math.min(Math.max(config.fc2, fc1 + 2), nyquist - 1);
+                const order = config.order === 'ideal' ? 64 : parseInt(config.order, 10) || 4;
+                const effectiveOrder = config.zeroPhase && config.order !== 'ideal' ? order * 2 : order;
+
+                for (let i = 0; i < freqs.length; i++) {
+                    const f = Math.max(freqs[i], 0.1);
+                    let mag = 1.0;
+
+                    if (config.order === 'ideal') {
+                        if (config.type === 'lowpass') mag = f <= fc1 ? 1.0 : 0.0;
+                        else if (config.type === 'highpass') mag = f >= fc1 ? 1.0 : 0.0;
+                        else if (config.type === 'bandpass') mag = (f >= fc1 && f <= fc2) ? 1.0 : 0.0;
+                        else if (config.type === 'bandstop') mag = (f < fc1 || f > fc2) ? 1.0 : 0.0;
+                    } else {
+                        if (config.type === 'lowpass') {
+                            mag = 1 / Math.sqrt(1 + Math.pow(f / fc1, 2 * effectiveOrder));
+                        } else if (config.type === 'highpass') {
+                            mag = 1 / Math.sqrt(1 + Math.pow(fc1 / f, 2 * effectiveOrder));
+                        } else if (config.type === 'bandpass') {
+                            const hp = 1 / Math.sqrt(1 + Math.pow(fc1 / f, 2 * effectiveOrder));
+                            const lp = 1 / Math.sqrt(1 + Math.pow(f / fc2, 2 * effectiveOrder));
+                            mag = hp * lp;
+                        } else if (config.type === 'bandstop') {
+                            const f0 = Math.sqrt(fc1 * fc2);
+                            const bw = Math.max(fc2 - fc1, 2);
+                            const normDist = Math.abs(f * f - f0 * f0) / (f * bw);
+                            mag = 1 / Math.sqrt(1 + Math.pow(1 / Math.max(normDist, 1e-4), effectiveOrder));
+                        }
+                    }
+                    resp[i] = mag;
+                }
+                return resp;
+            }
+        }
+
+        /**
+         * ============================================================================
+         * 2. APPLICATION STATE & REAL-TIME SIMULATION CONTROLLER
+         * ============================================================================
+         */
+        const state = {
+            fs: 1000,
+            duration: 1.0,
+            windowType: 'rect',
+            isAMMode: false,
+
+            c1: { enabled: true, wave: 'sine', freq: 15, amp: 1.5, phase: 0 },
+            c2: { enabled: true, wave: 'sine', freq: 60, amp: 0.9, phase: 30 },
+            c3: { enabled: true, freq: 320, amp: 0.6, sigma: 0.35 },
+
+            filter: {
+                enabled: true,
+                type: 'lowpass',
+                order: '4',
+                fc1: 100,
+                fc2: 180,
+                zeroPhase: true
+            },
+
+            view: {
+                timeZoom: 0.4,
+                timePan: 0.0,
+                showCleanOnPlot1: false,
+                showFilteredOnPlot1: false,
+                fftScale: 'linear', // 'linear' | 'db'
+                fftShowFiltered: true,
+                fftShowResponse: true,
+                plot3Tab: 'reconstructed' // 'reconstructed' | 'phase' | 'spectrogram'
+            },
+
+            // Computed buffers
+            t: new Float64Array(0),
+            cleanSignal: new Float64Array(0),
+            compositeSignal: new Float64Array(0),
+            filteredSignal: new Float64Array(0),
+            noiseCache: new Float64Array(0),
+            fftRaw: null,
+            fftFiltered: null,
+            detectedPeaks: []
+        };
+
+        // Generate reusable standard normal random numbers (Box-Muller transform)
+        function generateGaussianNoise(length) {
+            const arr = new Float64Array(length);
+            for (let i = 0; i < length; i += 2) {
+                let u = 0, v = 0;
+                while (u === 0) u = Math.random();
+                while (v === 0) v = Math.random();
+                const z0 = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+                const z1 = Math.sqrt(-2.0 * Math.log(u)) * Math.sin(2.0 * Math.PI * v);
+                arr[i] = z0;
+                if (i + 1 < length) arr[i + 1] = z1;
+            }
+            return arr;
+        }
+
+        // Helper to evaluate waveform value
+        function evalWaveform(type, freq, phaseDeg, t, duration) {
+            const phaseRad = (phaseDeg * Math.PI) / 180;
+            const angle = 2 * Math.PI * freq * t + phaseRad;
+            switch (type) {
+                case 'cosine':
+                    return Math.cos(angle);
+                case 'square':
+                    return Math.sin(angle) >= 0 ? 1.0 : -1.0;
+                case 'sawtooth': {
+                    const cycle = (freq * t + phaseDeg / 360) % 1;
+                    return 2 * (cycle < 0 ? cycle + 1 : cycle) - 1;
+                }
+                case 'chirp': {
+                    // Linear chirp from 5 Hz up to freq * 4 over duration
+                    const f0 = 5;
+                    const f1 = Math.max(freq * 4, 80);
+                    const k = (f1 - f0) / duration;
+                    const chirpPhase = 2 * Math.PI * (f0 * t + 0.5 * k * t * t) + phaseRad;
+                    return Math.sin(chirpPhase);
+                }
+                case 'sine':
+                default:
+                    return Math.sin(angle);
+            }
+        }
+
+        // Main Simulation Pipeline
+        function runSimulation(reseedNoise = false) {
+            const N = Math.floor(state.fs * state.duration);
+            if (reseedNoise || state.noiseCache.length !== N) {
+                state.noiseCache = generateGaussianNoise(N);
+            }
+
+            const t = new Float64Array(N);
+            const clean = new Float64Array(N);
+            const composite = new Float64Array(N);
+
+            for (let i = 0; i < N; i++) {
+                const time = i / state.fs;
+                t[i] = time;
+
+                let s1 = 0;
+                if (state.c1.enabled) {
+                    s1 = state.c1.amp * evalWaveform(state.c1.wave, state.c1.freq, state.c1.phase, time, state.duration);
+                }
+
+                let s2 = 0;
+                if (state.c2.enabled) {
+                    s2 = state.c2.amp * evalWaveform(state.c2.wave, state.c2.freq, state.c2.phase, time, state.duration);
+                }
+
+                // Clean target signal
+                let targetVal = 0;
+                if (state.isAMMode && state.c1.enabled && state.c2.enabled) {
+                    // AM Modulation: Carrier (c2) modulated by Baseband (c1)
+                    const carrier = evalWaveform(state.c2.wave, state.c2.freq, state.c2.phase, time, state.duration);
+                    const mod = evalWaveform(state.c1.wave, state.c1.freq, state.c1.phase, time, state.duration);
+                    targetVal = state.c2.amp * (1 + 0.7 * mod) * carrier;
+                } else {
+                    targetVal = s1 + s2;
+                }
+                clean[i] = targetVal;
+
+                // High-frequency interference + Gaussian white noise
+                let interference = 0;
+                if (state.c3.enabled) {
+                    const hfTone = state.c3.amp * Math.sin(2 * Math.PI * state.c3.freq * time);
+                    const awgn = state.c3.sigma * state.noiseCache[i];
+                    interference = hfTone + awgn;
+                }
+
+                composite[i] = targetVal + interference;
+            }
+
+            state.t = t;
+            state.cleanSignal = clean;
+            state.compositeSignal = composite;
+
+            // Apply Digital Filter
+            state.filteredSignal = DSPEngine.applyDigitalFilter(composite, state.fs, state.filter);
+
+            // Compute FFT for Raw Composite and Filtered Signal
+            state.fftRaw = DSPEngine.computeFFT(composite, state.windowType);
+            state.fftFiltered = DSPEngine.computeFFT(state.filteredSignal, state.windowType);
+
+            // Detect Dominant Peaks on Active Spectrum
+            const activeMags = state.filter.enabled ? state.fftFiltered.magnitudes : state.fftRaw.magnitudes;
+            state.detectedPeaks = detectSpectralPeaks(activeMags, state.fs, state.fftRaw.nFFT);
+
+            updateMetricsUI();
+            renderAllPlots();
+        }
+
+        function detectSpectralPeaks(magnitudes, fs, nFFT) {
+            const peaks = [];
+            const df = fs / nFFT;
+            let maxMag = 0;
+            for (let i = 1; i < magnitudes.length - 1; i++) {
+                if (magnitudes[i] > maxMag) maxMag = magnitudes[i];
+            }
+            const threshold = Math.max(maxMag * 0.15, 0.05);
+
+            for (let i = 1; i < magnitudes.length - 1; i++) {
+                if (magnitudes[i] > threshold && magnitudes[i] > magnitudes[i - 1] && magnitudes[i] >= magnitudes[i + 1]) {
+                    // Parabolic interpolation for sub-bin frequency accuracy
+                    const alpha = magnitudes[i - 1];
+                    const beta = magnitudes[i];
+                    const gamma = magnitudes[i + 1];
+                    const denom = alpha - 2 * beta + gamma;
+                    const delta = denom !== 0 ? (0.5 * (alpha - gamma)) / denom : 0;
+                    const freq = (i + delta) * df;
+                    peaks.push({ bin: i, freq, mag: beta });
+                }
+            }
+
+            peaks.sort((a, b) => b.mag - a.mag);
+            return peaks.slice(0, 4);
+        }
+
+        function updateMetricsUI() {
+            const N = state.cleanSignal.length;
+            if (N === 0) return;
+
+            // Update Nyquist & Sample count labels
+            document.getElementById('nyquist-display').textContent = `${(state.fs / 2).toFixed(0)} Hz`;
+            document.getElementById('samples-display').textContent = `${N}`;
+
+            // Update Accordion Active State Badges
+            const badgeSampling = document.getElementById('badge-sampling');
+            if (badgeSampling) badgeSampling.textContent = `${state.fs}Hz · ${state.duration.toFixed(1)}s`;
+
+            const badgeSignals = document.getElementById('badge-signals');
+            if (badgeSignals) {
+                const activeSigs = [];
+                if (state.c1.enabled) activeSigs.push(`${state.c1.freq}Hz`);
+                if (state.c2.enabled) activeSigs.push(`${state.c2.freq}Hz`);
+                badgeSignals.textContent = activeSigs.length > 0 ? activeSigs.join(' + ') : 'OFF';
+            }
+
+            const badgeNoise = document.getElementById('badge-noise');
+            if (badgeNoise) {
+                badgeNoise.textContent = state.c3.enabled ? `${state.c3.freq}Hz · σ=${state.c3.sigma.toFixed(2)}` : 'OFF';
+            }
+
+            const badgeFilter = document.getElementById('badge-filter');
+            if (badgeFilter) {
+                if (!state.filter.enabled) {
+                    badgeFilter.textContent = 'BYPASS';
+                } else {
+                    const typeMap = { lowpass: 'LPF', highpass: 'HPF', bandpass: 'BPF', bandstop: 'NOTCH' };
+                    const tLabel = typeMap[state.filter.type] || 'FILTER';
+                    const isBand = state.filter.type === 'bandpass' || state.filter.type === 'bandstop';
+                    badgeFilter.textContent = isBand ? `${tLabel} · ${state.filter.fc1}~${state.filter.fc2}Hz` : `${tLabel} · ${state.filter.fc1}Hz`;
+                }
+            }
+
+            // Peak Frequencies
+            const peaksEl = document.getElementById('metric-peaks');
+            const peakMagsEl = document.getElementById('metric-peak-mags');
+            if (state.detectedPeaks.length > 0) {
+                peaksEl.textContent = state.detectedPeaks.slice(0, 3).map(p => `${p.freq.toFixed(1)} Hz`).join(', ');
+                peakMagsEl.textContent = `최대 피크 진폭: ${state.detectedPeaks[0].mag.toFixed(2)} V`;
+            } else {
+                peaksEl.textContent = '검출된 피크 없음';
+                peakMagsEl.textContent = '최대 진폭: 0.00 V';
+            }
+
+            // RMS & Power Calculations
+            let sumCleanSq = 0;
+            let sumRawSq = 0;
+            let sumFiltSq = 0;
+            let sumNoiseInSq = 0;
+            let sumNoiseOutSq = 0;
+
+            for (let i = 0; i < N; i++) {
+                const c = state.cleanSignal[i];
+                const r = state.compositeSignal[i];
+                const f = state.filteredSignal[i];
+
+                sumCleanSq += c * c;
+                sumRawSq += r * r;
+                sumFiltSq += f * f;
+
+                const errIn = r - c;
+                const errOut = f - c;
+                sumNoiseInSq += errIn * errIn;
+                sumNoiseOutSq += errOut * errOut;
+            }
+
+            const rmsRaw = Math.sqrt(sumRawSq / N);
+            const rmsFilt = Math.sqrt(sumFiltSq / N);
+            const mse = sumNoiseOutSq / N;
+
+            document.getElementById('metric-rms-filtered').textContent = `${rmsFilt.toFixed(2)} V`;
+            document.getElementById('metric-rms-raw').textContent = `(입력: ${rmsRaw.toFixed(2)} V)`;
+
+            // SNR (dB)
+            const snrIn = sumNoiseInSq > 1e-12 ? 10 * Math.log10(Math.max(sumCleanSq, 1e-12) / sumNoiseInSq) : 60;
+            const snrOut = sumNoiseOutSq > 1e-12 ? 10 * Math.log10(Math.max(sumCleanSq, 1e-12) / sumNoiseOutSq) : 60;
+            const snrGain = snrOut - snrIn;
+
+            document.getElementById('metric-snr-out').textContent = `${snrOut >= 0 ? '+' : ''}${snrOut.toFixed(1)} dB`;
+            document.getElementById('metric-snr-in').textContent = `(입력: ${snrIn >= 0 ? '+' : ''}${snrIn.toFixed(1)} dB)`;
+            const gainEl = document.getElementById('metric-snr-gain');
+            gainEl.textContent = `필터링 이득: ${snrGain >= 0 ? '+' : ''}${snrGain.toFixed(1)} dB`;
+            gainEl.className = `text-[10px] font-mono mt-0.5 ${snrGain >= 0 ? 'text-emerald-500' : 'text-rose-500'}`;
+
+            // MSE & THD estimate
+            document.getElementById('metric-mse').textContent = mse.toFixed(4);
+            let thdPercent = 0;
+            if (state.detectedPeaks.length > 0) {
+                const f0Mag = state.detectedPeaks[0].mag;
+                let harmonicPower = 0;
+                for (let k = 1; k < state.detectedPeaks.length; k++) {
+                    harmonicPower += state.detectedPeaks[k].mag ** 2;
+                }
+                thdPercent = f0Mag > 1e-4 ? (Math.sqrt(harmonicPower) / f0Mag) * 100 : 0;
+            }
+            document.getElementById('metric-thd').textContent = `고조파비: ${thdPercent.toFixed(1)}%`;
+        }
+
+        /**
+         * ============================================================================
+         * 3. HIGH-DPI SCIENTIFIC MATPLOTLIB-STYLE CANVAS RENDERER
+         * ============================================================================
+         */
+        function getChartPalette() {
+            const isDark = document.documentElement.classList.contains('dark');
+            return isDark ? {
+                bg: '#0f172a',
+                plotBg: '#0b1120',
+                grid: '#1e293b',
+                axis: '#475569',
+                text: '#94a3b8',
+                titleText: '#e2e8f0',
+                rawSignal: '#38bdf8',      // Sky Blue
+                cleanSignal: '#10b981',    // Emerald
+                filteredSignal: '#f59e0b', // Amber
+                fftRaw: '#6366f1',         // Indigo
+                fftFiltered: '#10b981',    // Emerald
+                filterResp: '#f43f5e',     // Rose
+                peakBadge: '#fbbf24'
+            } : {
+                bg: '#ffffff',
+                plotBg: '#f8fafc',
+                grid: '#e2e8f0',
+                axis: '#94a3b8',
+                text: '#475569',
+                titleText: '#0f172a',
+                rawSignal: '#2563eb',      // Royal Blue
+                cleanSignal: '#059669',    // Emerald
+                filteredSignal: '#d97706', // Amber
+                fftRaw: '#4f46e5',         // Indigo
+                fftFiltered: '#059669',    // Emerald
+                filterResp: '#e11d48',     // Rose
+                peakBadge: '#b45309'
+            };
+        }
+
+        function setupHiDPICanvas(canvas) {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.max(10, Math.floor(rect.width * dpr));
+            canvas.height = Math.max(10, Math.floor(rect.height * dpr));
+            const ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+            return { ctx, width: rect.width, height: rect.height };
+        }
+
+        function drawAxesAndGrid(ctx, width, height, pad, xRange, yRange, xLabel, yLabel, palette) {
+            const plotW = width - pad.left - pad.right;
+            const plotH = height - pad.top - pad.bottom;
+
+            // Background
+            ctx.fillStyle = palette.plotBg;
+            ctx.fillRect(pad.left, pad.top, plotW, plotH);
+
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.lineWidth = 1;
+
+            // Vertical Grid & X-axis Ticks
+            const xTicks = 8;
+            for (let i = 0; i <= xTicks; i++) {
+                const ratio = i / xTicks;
+                const x = pad.left + ratio * plotW;
+                const val = xRange[0] + ratio * (xRange[1] - xRange[0]);
+
+                ctx.strokeStyle = palette.grid;
+                ctx.beginPath();
+                ctx.moveTo(x, pad.top);
+                ctx.lineTo(x, pad.top + plotH);
+                ctx.stroke();
+
+                ctx.fillStyle = palette.text;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                const formatted = Math.abs(xRange[1] - xRange[0]) <= 2 ? val.toFixed(2) : Math.round(val).toString();
+                ctx.fillText(formatted, x, pad.top + plotH + 6);
+            }
+
+            // Horizontal Grid & Y-axis Ticks
+            const yTicks = 5;
+            for (let i = 0; i <= yTicks; i++) {
+                const ratio = i / yTicks;
+                const y = pad.top + plotH - ratio * plotH;
+                const val = yRange[0] + ratio * (yRange[1] - yRange[0]);
+
+                ctx.strokeStyle = Math.abs(val) < 1e-6 ? palette.axis : palette.grid;
+                ctx.beginPath();
+                ctx.moveTo(pad.left, y);
+                ctx.lineTo(pad.left + plotW, y);
+                ctx.stroke();
+
+                ctx.fillStyle = palette.text;
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(val.toFixed(1), pad.left - 8, y);
+            }
+
+            // Plot Border
+            ctx.strokeStyle = palette.axis;
+            ctx.strokeRect(pad.left, pad.top, plotW, plotH);
+
+            // Axis Labels
+            ctx.fillStyle = palette.titleText;
+            ctx.font = '600 11px "Noto Sans KR", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(xLabel, pad.left + plotW / 2, height - 12);
+
+            ctx.save();
+            ctx.translate(14, pad.top + plotH / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText(yLabel, 0, 0);
+            ctx.restore();
+
+            return { plotW, plotH };
+        }
+
+        // --- SUBPLOT 1: Time-Domain Composite Signal ---
+        function renderPlot1() {
+            const canvas = document.getElementById('canvas-time-raw');
+            const { ctx, width, height } = setupHiDPICanvas(canvas);
+            const palette = getChartPalette();
+            const pad = { top: 24, right: 20, bottom: 34, left: 52 };
+
+            const totalDur = state.duration;
+            const winDur = Math.max(0.05, totalDur * state.view.timeZoom);
+            const maxStart = Math.max(0, totalDur - winDur);
+            const tStart = maxStart * state.view.timePan;
+            const tEnd = tStart + winDur;
+
+            const startIdx = Math.floor(tStart * state.fs);
+            const endIdx = Math.min(state.t.length - 1, Math.ceil(tEnd * state.fs));
+
+            // Dynamic Y-Axis Bounds
+            let maxAmp = 1.0;
+            for (let i = startIdx; i <= endIdx; i++) {
+                const absVal = Math.abs(state.compositeSignal[i]);
+                if (absVal > maxAmp) maxAmp = absVal;
+            }
+            const yBound = Math.ceil(maxAmp * 1.15 * 2) / 2;
+
+            const { plotW, plotH } = drawAxesAndGrid(
+                ctx, width, height, pad,
+                [tStart, tEnd], [-yBound, yBound],
+                '시간 Time (초, s)', '진폭 (V)', palette
+            );
+
+            const mapX = (time) => pad.left + ((time - tStart) / (tEnd - tStart)) * plotW;
+            const mapY = (val) => pad.top + plotH / 2 - (val / yBound) * (plotH / 2);
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(pad.left, pad.top, plotW, plotH);
+            ctx.clip();
+
+            // 1. Composite Raw Signal
+            ctx.strokeStyle = palette.rawSignal;
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            for (let i = startIdx; i <= endIdx; i++) {
+                const x = mapX(state.t[i]);
+                const y = mapY(state.compositeSignal[i]);
+                if (i === startIdx) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // 2. Optional Clean Signal Overlay
+            if (state.view.showCleanOnPlot1) {
+                ctx.strokeStyle = palette.cleanSignal;
+                ctx.lineWidth = 1.8;
+                ctx.setLineDash([5, 3]);
+                ctx.beginPath();
+                for (let i = startIdx; i <= endIdx; i++) {
+                    const x = mapX(state.t[i]);
+                    const y = mapY(state.cleanSignal[i]);
+                    if (i === startIdx) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // 3. Optional Filtered Signal Overlay
+            if (state.view.showFilteredOnPlot1 && state.filter.enabled) {
+                ctx.strokeStyle = palette.filteredSignal;
+                ctx.lineWidth = 2.0;
+                ctx.beginPath();
+                for (let i = startIdx; i <= endIdx; i++) {
+                    const x = mapX(state.t[i]);
+                    const y = mapY(state.filteredSignal[i]);
+                    if (i === startIdx) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // Legend Box (Top Right inside Plot)
+            const legends = [{ label: '합성 입력 x(t)', color: palette.rawSignal, dash: false }];
+            if (state.view.showCleanOnPlot1) legends.push({ label: '원본 클린 s(t)', color: palette.cleanSignal, dash: true });
+            if (state.view.showFilteredOnPlot1 && state.filter.enabled) legends.push({ label: '필터 출력 y(t)', color: palette.filteredSignal, dash: false });
+            drawLegend(ctx, width - pad.right - 10, pad.top + 8, legends, palette);
+
+            canvas._plotMeta = { pad, plotW, plotH, xRange: [tStart, tEnd], yRange: [-yBound, yBound] };
+        }
+
+        // --- SUBPLOT 2: Frequency-Domain Spectrum (FFT Magnitude) ---
+        function renderPlot2() {
+            const canvas = document.getElementById('canvas-fft');
+            const { ctx, width, height } = setupHiDPICanvas(canvas);
+            const palette = getChartPalette();
+            const pad = { top: 24, right: 20, bottom: 34, left: 52 };
+
+            if (!state.fftRaw) return;
+            const nyquist = state.fs / 2;
+            const isDB = state.view.fftScale === 'db';
+            const rawArr = isDB ? state.fftRaw.magnitudesDB : state.fftRaw.magnitudes;
+            const filtArr = isDB ? state.fftFiltered.magnitudesDB : state.fftFiltered.magnitudes;
+            const halfN = state.fftRaw.halfN;
+
+            let yMin = 0, yMax = 2.0;
+            if (isDB) {
+                yMin = -80;
+                yMax = 10;
+            } else {
+                let peak = 0.5;
+                for (let i = 1; i < halfN; i++) {
+                    if (rawArr[i] > peak) peak = rawArr[i];
+                }
+                yMax = Math.ceil(peak * 1.2 * 4) / 4;
+            }
+
+            const { plotW, plotH } = drawAxesAndGrid(
+                ctx, width, height, pad,
+                [0, nyquist], [yMin, yMax],
+                '주파수 Frequency (Hz)', isDB ? '크기 (dB)' : '진폭 |X(f)| (V)', palette
+            );
+
+            const mapX = (freq) => pad.left + (freq / nyquist) * plotW;
+            const mapY = (val) => {
+                const clamped = Math.max(yMin, Math.min(yMax, val));
+                return pad.top + plotH - ((clamped - yMin) / (yMax - yMin)) * plotH;
+            };
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(pad.left, pad.top, plotW, plotH);
+            ctx.clip();
+
+            // 1. Raw FFT Spectrum
+            ctx.strokeStyle = palette.fftRaw;
+            ctx.fillStyle = palette.fftRaw + '26'; // 15% alpha
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(mapX(0), mapY(yMin));
+            for (let i = 0; i < halfN; i++) {
+                const freq = (i * state.fs) / state.fftRaw.nFFT;
+                ctx.lineTo(mapX(freq), mapY(rawArr[i]));
+            }
+            ctx.lineTo(mapX(nyquist), mapY(yMin));
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // 2. Filtered FFT Spectrum Overlay
+            if (state.view.fftShowFiltered && state.filter.enabled) {
+                ctx.strokeStyle = palette.fftFiltered;
+                ctx.lineWidth = 1.8;
+                ctx.beginPath();
+                for (let i = 0; i < halfN; i++) {
+                    const freq = (i * state.fs) / state.fftFiltered.nFFT;
+                    const x = mapX(freq);
+                    const y = mapY(filtArr[i]);
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+
+            // 3. Theoretical Filter Frequency Response Curve |H(f)|
+            if (state.view.fftShowResponse && state.filter.enabled) {
+                const numPts = 250;
+                const freqs = new Float64Array(numPts);
+                for (let i = 0; i < numPts; i++) freqs[i] = (i / (numPts - 1)) * nyquist;
+                const resp = DSPEngine.getFilterMagnitudeResponse(freqs, state.fs, state.filter);
+
+                ctx.strokeStyle = palette.filterResp;
+                ctx.lineWidth = 1.6;
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                for (let i = 0; i < numPts; i++) {
+                    const x = mapX(freqs[i]);
+                    let yVal;
+                    if (isDB) {
+                        yVal = 20 * Math.log10(Math.max(resp[i], 1e-4));
+                    } else {
+                        yVal = resp[i] * (yMax * 0.85);
+                    }
+                    const y = mapY(yVal);
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // 4. Peak Frequency Annotations
+            ctx.font = 'bold 10px "JetBrains Mono", monospace';
+            state.detectedPeaks.slice(0, 3).forEach((p, idx) => {
+                const px = mapX(p.freq);
+                const pyVal = isDB ? 20 * Math.log10(Math.max(p.mag, 1e-7)) : p.mag;
+                const py = mapY(pyVal);
+
+                ctx.fillStyle = palette.peakBadge;
+                ctx.beginPath();
+                ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.textAlign = px > width - 90 ? 'right' : 'left';
+                ctx.fillText(`${p.freq.toFixed(1)}Hz`, px + (px > width - 90 ? -6 : 6), Math.max(pad.top + 14, py - 6));
+            });
+
+            ctx.restore();
+
+            const legends = [{ label: '입력 스펙트럼 |X(f)|', color: palette.fftRaw, dash: false }];
+            if (state.view.fftShowFiltered && state.filter.enabled) legends.push({ label: '필터 출력 |Y(f)|', color: palette.fftFiltered, dash: false });
+            if (state.view.fftShowResponse && state.filter.enabled) legends.push({ label: '필터 응답 |H(f)|', color: palette.filterResp, dash: true });
+            drawLegend(ctx, width - pad.right - 10, pad.top + 8, legends, palette);
+
+            canvas._plotMeta = { pad, plotW, plotH, xRange: [0, nyquist], yRange: [yMin, yMax], isDB };
+        }
+
+        // --- SUBPLOT 3: Reconstructed Signal / Phase Spectrum / Spectrogram ---
+        function renderPlot3() {
+            const canvas = document.getElementById('canvas-bottom');
+            const { ctx, width, height } = setupHiDPICanvas(canvas);
+            const palette = getChartPalette();
+            const pad = { top: 24, right: 20, bottom: 34, left: 52 };
+
+            if (state.view.plot3Tab === 'reconstructed') {
+                // Reconstructed Filtered Signal vs Original Clean Target Signal
+                const totalDur = state.duration;
+                const winDur = Math.max(0.05, totalDur * state.view.timeZoom);
+                const maxStart = Math.max(0, totalDur - winDur);
+                const tStart = maxStart * state.view.timePan;
+                const tEnd = tStart + winDur;
+
+                const startIdx = Math.floor(tStart * state.fs);
+                const endIdx = Math.min(state.t.length - 1, Math.ceil(tEnd * state.fs));
+
+                let maxAmp = 1.0;
+                for (let i = startIdx; i <= endIdx; i++) {
+                    maxAmp = Math.max(maxAmp, Math.abs(state.cleanSignal[i]), Math.abs(state.filteredSignal[i]));
+                }
+                const yBound = Math.ceil(maxAmp * 1.15 * 2) / 2;
+
+                const { plotW, plotH } = drawAxesAndGrid(
+                    ctx, width, height, pad,
+                    [tStart, tEnd], [-yBound, yBound],
+                    '시간 Time (초, s)', '진폭 (V)', palette
+                );
+
+                const mapX = (time) => pad.left + ((time - tStart) / (tEnd - tStart)) * plotW;
+                const mapY = (val) => pad.top + plotH / 2 - (val / yBound) * (plotH / 2);
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(pad.left, pad.top, plotW, plotH);
+                ctx.clip();
+
+                // Clean Target Reference Signal
+                ctx.strokeStyle = palette.cleanSignal;
+                ctx.lineWidth = 1.8;
+                ctx.setLineDash([5, 3]);
+                ctx.beginPath();
+                for (let i = startIdx; i <= endIdx; i++) {
+                    const x = mapX(state.t[i]);
+                    const y = mapY(state.cleanSignal[i]);
+                    if (i === startIdx) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Filtered Output Signal
+                ctx.strokeStyle = palette.filteredSignal;
+                ctx.lineWidth = 2.0;
+                ctx.beginPath();
+                for (let i = startIdx; i <= endIdx; i++) {
+                    const x = mapX(state.t[i]);
+                    const y = mapY(state.filteredSignal[i]);
+                    if (i === startIdx) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.restore();
+
+                drawLegend(ctx, width - pad.right - 10, pad.top + 8, [
+                    { label: '필터 복원 파형 y(t)', color: palette.filteredSignal, dash: false },
+                    { label: '원본 목표 파형 s(t)', color: palette.cleanSignal, dash: true }
+                ], palette);
+
+                canvas._plotMeta = { pad, plotW, plotH, xRange: [tStart, tEnd], yRange: [-yBound, yBound], mode: 'reconstructed' };
+
+            } else if (state.view.plot3Tab === 'phase') {
+                // Phase Spectrum (Degrees)
+                const nyquist = state.fs / 2;
+                const { plotW, plotH } = drawAxesAndGrid(
+                    ctx, width, height, pad,
+                    [0, nyquist], [-180, 180],
+                    '주파수 Frequency (Hz)', '위상 Phase (°)', palette
+                );
+
+                const activePhases = state.filter.enabled ? state.fftFiltered.phases : state.fftRaw.phases;
+                const halfN = state.fftRaw.halfN;
+                const mapX = (freq) => pad.left + (freq / nyquist) * plotW;
+                const mapY = (deg) => pad.top + plotH / 2 - (deg / 180) * (plotH / 2);
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(pad.left, pad.top, plotW, plotH);
+                ctx.clip();
+
+                ctx.strokeStyle = palette.fftRaw;
+                ctx.lineWidth = 1.4;
+                for (let i = 1; i < halfN; i++) {
+                    if (Math.abs(activePhases[i]) > 0.1) {
+                        const freq = (i * state.fs) / state.fftRaw.nFFT;
+                        const x = mapX(freq);
+                        const y = mapY(activePhases[i]);
+                        ctx.beginPath();
+                        ctx.moveTo(x, mapY(0));
+                        ctx.lineTo(x, y);
+                        ctx.stroke();
+
+                        ctx.fillStyle = palette.filteredSignal;
+                        ctx.beginPath();
+                        ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+                ctx.restore();
+                canvas._plotMeta = { pad, plotW, plotH, xRange: [0, nyquist], yRange: [-180, 180], mode: 'phase' };
+
+            } else if (state.view.plot3Tab === 'spectrogram') {
+                // Short-Time Fourier Transform (STFT) Spectrogram Heatmap
+                const nyquist = state.fs / 2;
+                const { plotW, plotH } = drawAxesAndGrid(
+                    ctx, width, height, pad,
+                    [0, state.duration], [0, nyquist],
+                    '시간 Time (초, s)', '주파수 (Hz)', palette
+                );
+
+                const sig = state.filter.enabled ? state.filteredSignal : state.compositeSignal;
+                const winSize = Math.min(128, Math.pow(2, Math.floor(Math.log2(sig.length / 4))));
+                const hopSize = Math.max(8, Math.floor(winSize / 4));
+                const numFrames = Math.max(1, Math.floor((sig.length - winSize) / hopSize));
+
+                const cellW = plotW / numFrames;
+                const halfBins = winSize / 2;
+                const cellH = plotH / halfBins;
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(pad.left, pad.top, plotW, plotH);
+                ctx.clip();
+
+                for (let fIdx = 0; fIdx < numFrames; fIdx++) {
+                    const offset = fIdx * hopSize;
+                    const frame = sig.subarray(offset, offset + winSize);
+                    const fftRes = DSPEngine.computeFFT(frame, 'hann');
+                    const x = pad.left + fIdx * cellW;
+
+                    for (let b = 0; b < halfBins; b++) {
+                        const db = fftRes.magnitudesDB[b];
+                        // Map -60 dB .. 0 dB to Viridis-inspired color gradient
+                        const norm = Math.max(0, Math.min(1, (db + 60) / 60));
+                        ctx.fillStyle = getViridisColor(norm);
+                        const y = pad.top + plotH - (b + 1) * cellH;
+                        ctx.fillRect(x, y, Math.ceil(cellW), Math.ceil(cellH));
+                    }
+                }
+                ctx.restore();
+                canvas._plotMeta = { pad, plotW, plotH, xRange: [0, state.duration], yRange: [0, nyquist], mode: 'spectrogram' };
+            }
+        }
+
+        function getViridisColor(t) {
+            // Smooth scientific heatmap interpolation (Deep Purple -> Teal -> Emerald -> Bright Yellow)
+            const r = Math.round(255 * Math.min(1, Math.max(0, 1.5 * t - 0.35)));
+            const g = Math.round(255 * Math.min(1, Math.max(0, Math.sin(t * Math.PI * 0.85))));
+            const b = Math.round(255 * Math.min(1, Math.max(0, 0.7 - 0.8 * t + 0.3 * Math.sin(t * Math.PI))));
+            return `rgb(${r},${g},${b})`;
+        }
+
+        function drawLegend(ctx, rightX, topY, items, palette) {
+            ctx.save();
+            ctx.font = '500 10px "Noto Sans KR", sans-serif';
+            const lineHeight = 16;
+            const boxWidth = 128;
+            const boxHeight = items.length * lineHeight + 8;
+            const leftX = rightX - boxWidth;
+
+            ctx.fillStyle = palette.bg + 'E6';
+            ctx.strokeStyle = palette.grid;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(leftX, topY, boxWidth, boxHeight, 6);
+            ctx.fill();
+            ctx.stroke();
+
+            items.forEach((item, idx) => {
+                const y = topY + 12 + idx * lineHeight;
+                ctx.strokeStyle = item.color;
+                ctx.lineWidth = 2;
+                if (item.dash) ctx.setLineDash([4, 2]);
+                else ctx.setLineDash([]);
+
+                ctx.beginPath();
+                ctx.moveTo(leftX + 8, y);
+                ctx.lineTo(leftX + 24, y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                ctx.fillStyle = palette.titleText;
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(item.label, leftX + 30, y);
+            });
+            ctx.restore();
+        }
+
+        function renderAllPlots() {
+            renderPlot1();
+            renderPlot2();
+            renderPlot3();
+        }
+
+        /**
+         * ============================================================================
+         * 4. INTERACTIVE HOVER CROSSHAIRS & TOOLTIPS
+         * ============================================================================
+         */
+        function attachCanvasHover(canvasId, tooltipId, formatter) {
+            const canvas = document.getElementById(canvasId);
+            const tooltip = document.getElementById(tooltipId);
+
+            canvas.addEventListener('mousemove', (e) => {
+                const meta = canvas._plotMeta;
+                if (!meta) return;
+                const rect = canvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const my = e.clientY - rect.top;
+
+                if (mx < meta.pad.left || mx > meta.pad.left + meta.plotW ||
+                    my < meta.pad.top || my > meta.pad.top + meta.plotH) {
+                    tooltip.classList.add('hidden');
+                    return;
+                }
+
+                const xNorm = (mx - meta.pad.left) / meta.plotW;
+                const yNorm = 1 - (my - meta.pad.top) / meta.plotH;
+                const xVal = meta.xRange[0] + xNorm * (meta.xRange[1] - meta.xRange[0]);
+                const yVal = meta.yRange[0] + yNorm * (meta.yRange[1] - meta.yRange[0]);
+
+                tooltip.innerHTML = formatter(xVal, yVal, meta);
+                tooltip.classList.remove('hidden');
+
+                const tipX = mx + 14 > rect.width - 150 ? mx - 150 : mx + 14;
+                const tipY = Math.max(8, my - 28);
+                tooltip.style.left = `${tipX}px`;
+                tooltip.style.top = `${tipY}px`;
+            });
+
+            canvas.addEventListener('mouseleave', () => {
+                tooltip.classList.add('hidden');
+            });
+        }
+
+        attachCanvasHover('canvas-time-raw', 'tooltip-plot1', (t, y) => {
+            const idx = Math.min(state.t.length - 1, Math.max(0, Math.round(t * state.fs)));
+            const rawVal = state.compositeSignal[idx] || 0;
+            const filtVal = state.filteredSignal[idx] || 0;
+            return `t = ${t.toFixed(3)} s<br>입력 x(t) = ${rawVal.toFixed(3)} V<br>필터 y(t) = ${filtVal.toFixed(3)} V`;
+        });
+
+        attachCanvasHover('canvas-fft', 'tooltip-plot2', (freq, y, meta) => {
+            if (!state.fftRaw) return '';
+            const bin = Math.min(state.fftRaw.halfN - 1, Math.max(0, Math.round((freq * state.fftRaw.nFFT) / state.fs)));
+            const exactFreq = (bin * state.fs) / state.fftRaw.nFFT;
+            const rawMag = state.fftRaw.magnitudes[bin];
+            const filtMag = state.fftFiltered.magnitudes[bin];
+            return `주파수 f = ${exactFreq.toFixed(1)} Hz<br>입력 |X(f)| = ${rawMag.toFixed(3)} V<br>출력 |Y(f)| = ${filtMag.toFixed(3)} V`;
+        });
+
+        attachCanvasHover('canvas-bottom', 'tooltip-plot3', (x, y, meta) => {
+            if (meta.mode === 'reconstructed') {
+                const idx = Math.min(state.t.length - 1, Math.max(0, Math.round(x * state.fs)));
+                const cleanVal = state.cleanSignal[idx] || 0;
+                const filtVal = state.filteredSignal[idx] || 0;
+                return `t = ${x.toFixed(3)} s<br>복원 y(t) = ${filtVal.toFixed(3)} V<br>목표 s(t) = ${cleanVal.toFixed(3)} V`;
+            } else if (meta.mode === 'phase') {
+                return `주파수 f = ${x.toFixed(1)} Hz<br>커서 위상 = ${y.toFixed(1)}°`;
+            } else {
+                return `시간 t = ${x.toFixed(2)} s<br>주파수 f = ${y.toFixed(1)} Hz`;
+            }
+        });
+
+        /**
+         * ============================================================================
+         * 5. WEB AUDIO API SYNTHESIS & EXPORT UTILITIES (CSV / PNG)
+         * ============================================================================
+         */
+        let audioCtx = null;
+        let currentSourceNode = null;
+
+        function toggleAudioPlayback() {
+            const btnText = document.getElementById('btn-play-text');
+            if (currentSourceNode) {
+                try { currentSourceNode.stop(); } catch (e) {}
+                currentSourceNode = null;
+                btnText.textContent = '오디오 재생';
+                return;
+            }
+
+            try {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+
+                const sourceType = document.getElementById('audio-source-select').value;
+                const data = sourceType === 'filtered' ? state.filteredSignal :
+                             sourceType === 'clean' ? state.cleanSignal : state.compositeSignal;
+
+                if (!data || data.length === 0) return;
+
+                // Normalize amplitude safely to prevent ear-damaging clipping (max peak = 0.35)
+                let maxAbs = 0;
+                for (let i = 0; i < data.length; i++) {
+                    if (Math.abs(data[i]) > maxAbs) maxAbs = Math.abs(data[i]);
+                }
+                const gainScale = maxAbs > 1e-5 ? 0.35 / maxAbs : 0;
+
+                // Create AudioBuffer at the simulation's sampling rate (clamped to valid WebAudio range 3000..96000Hz via resampling if needed)
+                const targetRate = Math.max(8000, state.fs);
+                const ratio = targetRate / state.fs;
+                const outLength = Math.floor(data.length * ratio);
+                const audioBuffer = audioCtx.createBuffer(1, outLength, targetRate);
+                const channelData = audioBuffer.getChannelData(0);
+
+                for (let i = 0; i < outLength; i++) {
+                    const srcIdx = i / ratio;
+                    const idx0 = Math.floor(srcIdx);
+                    const idx1 = Math.min(data.length - 1, idx0 + 1);
+                    const frac = srcIdx - idx0;
+                    const sample = data[idx0] * (1 - frac) + data[idx1] * frac;
+                    // Apply short 15ms fade-in/out to eliminate click artifacts
+                    const fadeSamples = Math.min(outLength / 4, targetRate * 0.015);
+                    let env = 1.0;
+                    if (i < fadeSamples) env = i / fadeSamples;
+                    else if (i > outLength - fadeSamples) env = (outLength - i) / fadeSamples;
+
+                    channelData[i] = sample * gainScale * env;
+                }
+
+                const source = audioCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioCtx.destination);
+                source.onended = () => {
+                    currentSourceNode = null;
+                    btnText.textContent = '오디오 재생';
+                };
+
+                currentSourceNode = source;
+                btnText.textContent = '재생 중지';
+                source.start();
+                showToast(`선택된 신호(${sourceType === 'filtered' ? '필터 출력' : sourceType === 'clean' ? '원본 클린' : '합성 노이즈'})를 오디오로 재생합니다.`);
+            } catch (err) {
+                showToast('오디오 재생 중 오류가 발생했습니다: ' + err.message, 'error');
+            }
+        }
+
+        function exportCSV() {
+            const N = state.t.length;
+            if (N === 0) return;
+
+            let csv = 'Time_s,Clean_Signal_V,Composite_Noisy_V,Filtered_Output_V,Freq_Hz,FFT_Raw_Mag_V,FFT_Filtered_Mag_V\n';
+            const halfN = state.fftRaw.halfN;
+            const maxRows = Math.max(N, halfN);
+
+            for (let i = 0; i < maxRows; i++) {
+                const timeStr = i < N ? state.t[i].toFixed(6) : '';
+                const cleanStr = i < N ? state.cleanSignal[i].toFixed(6) : '';
+                const compStr = i < N ? state.compositeSignal[i].toFixed(6) : '';
+                const filtStr = i < N ? state.filteredSignal[i].toFixed(6) : '';
+
+                const freqStr = i < halfN ? ((i * state.fs) / state.fftRaw.nFFT).toFixed(3) : '';
+                const fftRawStr = i < halfN ? state.fftRaw.magnitudes[i].toFixed(6) : '';
+                const fftFiltStr = i < halfN ? state.fftFiltered.magnitudes[i].toFixed(6) : '';
+
+                csv += `${timeStr},${cleanStr},${compStr},${filtStr},${freqStr},${fftRawStr},${fftFiltStr}\n`;
+            }
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `dsp_signal_fft_analysis_${Date.now()}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('시계열 파형 및 FFT 스펙트럼 데이터가 CSV 파일로 저장되었습니다.');
+        }
+
+        function exportChartsPNG() {
+            const c1 = document.getElementById('canvas-time-raw');
+            const c2 = document.getElementById('canvas-fft');
+            const c3 = document.getElementById('canvas-bottom');
+
+            const w = Math.max(c1.width, c2.width, c3.width);
+            const gap = 24;
+            const headerH = 56;
+            const totalH = headerH + c1.height + c2.height + c3.height + gap * 3;
+
+            const merged = document.createElement('canvas');
+            merged.width = w;
+            merged.height = totalH;
+            const ctx = merged.getContext('2d');
+
+            const palette = getChartPalette();
+            ctx.fillStyle = palette.bg;
+            ctx.fillRect(0, 0, w, totalH);
+
+            // Title Header
+            ctx.fillStyle = palette.titleText;
+            ctx.font = 'bold 22px "Noto Sans KR", sans-serif';
+            ctx.fillText('DSP 신호 합성, FFT 스펙트럼 및 디지털 필터 분석 리포트', 24, 36);
+
+            let yOffset = headerH;
+            ctx.drawImage(c1, 0, yOffset);
+            yOffset += c1.height + gap;
+            ctx.drawImage(c2, 0, yOffset);
+            yOffset += c2.height + gap;
+            ctx.drawImage(c3, 0, yOffset);
+
+            const link = document.createElement('a');
+            link.download = `dsp_3subplot_report_${Date.now()}.png`;
+            link.href = merged.toDataURL('image/png');
+            link.click();
+            showToast('3단 분석 차트가 고해상도 PNG 이미지로 저장되었습니다.');
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const bgClass = type === 'error' ? 'bg-rose-600 text-white' : 'bg-slate-900 dark:bg-slate-800 text-white border border-slate-700';
+            toast.className = `${bgClass} px-4 py-2.5 rounded-xl shadow-xl text-xs font-medium flex items-center gap-2 transition-all duration-300 transform translate-y-2 opacity-0`;
+            toast.innerHTML = `<i class="fa-solid ${type === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check text-emerald-400'}"></i><span>${message}</span>`;
+            container.appendChild(toast);
+
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            });
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        /**
+         * ============================================================================
+         * 6. UI BINDINGS & PRESETS CONFIGURATION
+         * ============================================================================
+         */
+        function bindSliderAndNumber(sliderId, numId, onChange) {
+            const slider = document.getElementById(sliderId);
+            const num = document.getElementById(numId);
+
+            slider.addEventListener('input', () => {
+                num.value = slider.value;
+                onChange(parseFloat(slider.value));
+            });
+
+            num.addEventListener('change', () => {
+                let val = parseFloat(num.value);
+                if (isNaN(val)) val = parseFloat(slider.min);
+                slider.value = Math.min(Math.max(val, parseFloat(slider.min)), parseFloat(slider.max));
+                onChange(val);
+            });
+        }
+
+        function syncUIFromState() {
+            document.getElementById('fs-slider').value = state.fs;
+            document.getElementById('fs-num').value = state.fs;
+            document.getElementById('duration-slider').value = state.duration;
+            document.getElementById('duration-num').value = state.duration;
+            document.getElementById('window-type').value = state.windowType;
+
+            // Component 1
+            document.getElementById('c1-enable').checked = state.c1.enabled;
+            document.getElementById('c1-wave').value = state.c1.wave;
+            document.getElementById('c1-freq-slider').value = Math.min(500, state.c1.freq);
+            document.getElementById('c1-freq-num').value = state.c1.freq;
+            document.getElementById('c1-amp-slider').value = state.c1.amp;
+            document.getElementById('c1-amp-num').value = state.c1.amp;
+            document.getElementById('c1-phase-slider').value = state.c1.phase;
+            document.getElementById('c1-phase-num').value = state.c1.phase;
+
+            // Component 2
+            document.getElementById('c2-enable').checked = state.c2.enabled;
+            document.getElementById('c2-wave').value = state.c2.wave;
+            document.getElementById('c2-freq-slider').value = Math.min(500, state.c2.freq);
+            document.getElementById('c2-freq-num').value = state.c2.freq;
+            document.getElementById('c2-amp-slider').value = state.c2.amp;
+            document.getElementById('c2-amp-num').value = state.c2.amp;
+            document.getElementById('c2-phase-slider').value = state.c2.phase;
+            document.getElementById('c2-phase-num').value = state.c2.phase;
+
+            // Component 3
+            document.getElementById('c3-enable').checked = state.c3.enabled;
+            document.getElementById('c3-freq-slider').value = Math.min(1000, state.c3.freq);
+            document.getElementById('c3-freq-num').value = state.c3.freq;
+            document.getElementById('c3-amp-slider').value = state.c3.amp;
+            document.getElementById('c3-amp-num').value = state.c3.amp;
+            document.getElementById('noise-sigma-slider').value = state.c3.sigma;
+            document.getElementById('noise-sigma-num').value = state.c3.sigma;
+
+            // Filter
+            document.getElementById('filter-enable').checked = state.filter.enabled;
+            document.getElementById('filter-type').value = state.filter.type;
+            document.getElementById('filter-order').value = state.filter.order;
+            document.getElementById('filter-fc1-slider').value = Math.min(500, state.filter.fc1);
+            document.getElementById('filter-fc1-num').value = state.filter.fc1;
+            document.getElementById('filter-fc2-slider').value = Math.min(500, state.filter.fc2);
+            document.getElementById('filter-fc2-num').value = state.filter.fc2;
+            document.getElementById('filter-zerophase').checked = state.filter.zeroPhase;
+
+            updateFilterUIState();
+        }
+
+        function updateFilterUIState() {
+            const body = document.getElementById('filter-controls-body');
+            body.style.opacity = state.filter.enabled ? '1' : '0.45';
+            body.style.pointerEvents = state.filter.enabled ? 'auto' : 'none';
+
+            const isBand = state.filter.type === 'bandpass' || state.filter.type === 'bandstop';
+            document.getElementById('cutoff2-container').classList.toggle('hidden', !isBand);
+            document.getElementById('cutoff1-label').textContent = isBand ? '하한 차단 주파수 (fc₁)' : '차단 주파수 (fc)';
+        }
+
+        function applyPreset(presetName) {
+            state.isAMMode = false;
+            if (presetName === 'dual-noise') {
+                state.fs = 1000; state.duration = 1.0; state.windowType = 'rect';
+                state.c1 = { enabled: true, wave: 'sine', freq: 15, amp: 1.5, phase: 0 };
+                state.c2 = { enabled: true, wave: 'sine', freq: 60, amp: 0.9, phase: 30 };
+                state.c3 = { enabled: true, freq: 320, amp: 0.6, sigma: 0.35 };
+                state.filter = { enabled: true, type: 'lowpass', order: '4', fc1: 100, fc2: 180, zeroPhase: true };
+                state.view.timeZoom = 0.4;
+                showToast('프리셋 적용: 이중 톤(15Hz, 60Hz) + 고주파 간섭(320Hz) 및 저역통과 필터');
+            } else if (presetName === 'hum-60hz') {
+                state.fs = 1000; state.duration = 1.0; state.windowType = 'hann';
+                state.c1 = { enabled: true, wave: 'sine', freq: 12, amp: 1.6, phase: 0 };
+                state.c2 = { enabled: false, wave: 'sine', freq: 25, amp: 0.5, phase: 0 };
+                state.c3 = { enabled: true, freq: 60, amp: 1.1, sigma: 0.2 };
+                state.filter = { enabled: true, type: 'bandstop', order: '4', fc1: 55, fc2: 65, zeroPhase: true };
+                state.view.timeZoom = 0.35;
+                showToast('프리셋 적용: 12Hz 생체/센서 신호 + 60Hz 전원선 험 노이즈 및 대역저지(Notch) 필터');
+            } else if (presetName === 'am-mod') {
+                state.isAMMode = true;
+                state.fs = 1200; state.duration = 1.0; state.windowType = 'hann';
+                state.c1 = { enabled: true, wave: 'sine', freq: 15, amp: 1.0, phase: 0 };
+                state.c2 = { enabled: true, wave: 'sine', freq: 150, amp: 1.4, phase: 0 };
+                state.c3 = { enabled: true, freq: 420, amp: 0.4, sigma: 0.2 };
+                state.filter = { enabled: true, type: 'bandpass', order: '4', fc1: 110, fc2: 190, zeroPhase: true };
+                state.view.timeZoom = 0.25;
+                showToast('프리셋 적용: AM 진폭 변조(반송파 150Hz ± 측대파 15Hz) 및 대역통과 필터');
+            } else if (presetName === 'chirp-multi') {
+                state.fs = 1000; state.duration = 1.5; state.windowType = 'hann';
+                state.c1 = { enabled: true, wave: 'chirp', freq: 45, amp: 1.4, phase: 0 };
+                state.c2 = { enabled: false, wave: 'sine', freq: 60, amp: 0.5, phase: 0 };
+                state.c3 = { enabled: true, freq: 380, amp: 0.4, sigma: 0.25 };
+                state.filter = { enabled: true, type: 'lowpass', order: '4', fc1: 220, fc2: 300, zeroPhase: true };
+                state.view.timeZoom = 1.0;
+                switchPlot3Tab('spectrogram');
+                showToast('프리셋 적용: 시간-주파수 처프(Chirp) 신호 및 STFT 스펙트로그램 시각화');
+            }
+
+            // Highlight active quick preset button
+            document.querySelectorAll('.quick-preset-btn').forEach(btn => {
+                const isActive = btn.dataset.preset === presetName;
+                btn.className = isActive
+                    ? 'quick-preset-btn px-2 py-1 rounded-md text-[11px] font-semibold bg-blue-600 text-white shadow-xs transition'
+                    : 'quick-preset-btn px-2 py-1 rounded-md text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 transition';
+            });
+
+            document.getElementById('time-zoom-slider').value = state.view.timeZoom;
+            document.getElementById('time-zoom-val').textContent = `${(state.duration * state.view.timeZoom).toFixed(2)}s`;
+            syncUIFromState();
+            runSimulation(true);
+        }
+
+        function switchPlot3Tab(tabName) {
+            state.view.plot3Tab = tabName;
+            document.querySelectorAll('.plot3-tab').forEach(btn => {
+                const isTarget = btn.dataset.tab === tabName;
+                if (isTarget) {
+                    btn.className = 'plot3-tab px-2.5 py-1 rounded-md font-semibold bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-300 shadow-sm transition';
+                } else {
+                    btn.className = 'plot3-tab px-2.5 py-1 rounded-md font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition';
+                }
+            });
+
+            const titleEl = document.getElementById('plot3-title');
+            if (tabName === 'reconstructed') {
+                titleEl.textContent = '디지털 필터 복원 신호 vs 원본 클린 신호 (Reconstructed Signal)';
+            } else if (tabName === 'phase') {
+                titleEl.textContent = '주파수 성분별 위상 스펙트럼 (Phase Spectrum, Degrees)';
+            } else if (tabName === 'spectrogram') {
+                titleEl.textContent = '단시간 푸리에 변환 시간-주파수 스펙트로그램 (STFT Spectrogram)';
+            }
+            renderPlot3();
+        }
+
+        // Initialize All Event Listeners
+        window.addEventListener('DOMContentLoaded', () => {
+            // Sampling & Window
+            bindSliderAndNumber('fs-slider', 'fs-num', (v) => { state.fs = v; runSimulation(true); });
+            bindSliderAndNumber('duration-slider', 'duration-num', (v) => {
+                state.duration = v;
+                document.getElementById('time-zoom-val').textContent = `${(state.duration * state.view.timeZoom).toFixed(2)}s`;
+                runSimulation(true);
+            });
+            document.getElementById('window-type').addEventListener('change', (e) => {
+                state.windowType = e.target.value;
+                runSimulation(false);
+            });
+
+            // Component 1
+            document.getElementById('c1-enable').addEventListener('change', (e) => { state.c1.enabled = e.target.checked; runSimulation(false); });
+            document.getElementById('c1-wave').addEventListener('change', (e) => { state.c1.wave = e.target.value; runSimulation(false); });
+            bindSliderAndNumber('c1-freq-slider', 'c1-freq-num', (v) => { state.c1.freq = v; runSimulation(false); });
+            bindSliderAndNumber('c1-amp-slider', 'c1-amp-num', (v) => { state.c1.amp = v; runSimulation(false); });
+            bindSliderAndNumber('c1-phase-slider', 'c1-phase-num', (v) => { state.c1.phase = v; runSimulation(false); });
+
+            // Component 2
+            document.getElementById('c2-enable').addEventListener('change', (e) => { state.c2.enabled = e.target.checked; runSimulation(false); });
+            document.getElementById('c2-wave').addEventListener('change', (e) => { state.c2.wave = e.target.value; runSimulation(false); });
+            bindSliderAndNumber('c2-freq-slider', 'c2-freq-num', (v) => { state.c2.freq = v; runSimulation(false); });
+            bindSliderAndNumber('c2-amp-slider', 'c2-amp-num', (v) => { state.c2.amp = v; runSimulation(false); });
+            bindSliderAndNumber('c2-phase-slider', 'c2-phase-num', (v) => { state.c2.phase = v; runSimulation(false); });
+
+            // Component 3 & Noise
+            document.getElementById('c3-enable').addEventListener('change', (e) => { state.c3.enabled = e.target.checked; runSimulation(false); });
+            bindSliderAndNumber('c3-freq-slider', 'c3-freq-num', (v) => { state.c3.freq = v; runSimulation(false); });
+            bindSliderAndNumber('c3-amp-slider', 'c3-amp-num', (v) => { state.c3.amp = v; runSimulation(false); });
+            bindSliderAndNumber('noise-sigma-slider', 'noise-sigma-num', (v) => { state.c3.sigma = v; runSimulation(false); });
+            document.getElementById('btn-reseed-noise').addEventListener('click', () => runSimulation(true));
+
+            // Filter Controls
+            document.getElementById('filter-enable').addEventListener('change', (e) => {
+                state.filter.enabled = e.target.checked;
+                updateFilterUIState();
+                runSimulation(false);
+            });
+            document.getElementById('filter-type').addEventListener('change', (e) => {
+                state.filter.type = e.target.value;
+                updateFilterUIState();
+                runSimulation(false);
+            });
+            document.getElementById('filter-order').addEventListener('change', (e) => {
+                state.filter.order = e.target.value;
+                runSimulation(false);
+            });
+            bindSliderAndNumber('filter-fc1-slider', 'filter-fc1-num', (v) => { state.filter.fc1 = v; runSimulation(false); });
+            bindSliderAndNumber('filter-fc2-slider', 'filter-fc2-num', (v) => { state.filter.fc2 = v; runSimulation(false); });
+            document.getElementById('filter-zerophase').addEventListener('change', (e) => {
+                state.filter.zeroPhase = e.target.checked;
+                runSimulation(false);
+            });
+
+            // Subplot 1 View Controls
+            document.getElementById('plot1-show-clean').addEventListener('change', (e) => { state.view.showCleanOnPlot1 = e.target.checked; renderPlot1(); });
+            document.getElementById('plot1-show-filtered').addEventListener('change', (e) => { state.view.showFilteredOnPlot1 = e.target.checked; renderPlot1(); });
+            document.getElementById('time-zoom-slider').addEventListener('input', (e) => {
+                state.view.timeZoom = parseFloat(e.target.value);
+                document.getElementById('time-zoom-val').textContent = `${(state.duration * state.view.timeZoom).toFixed(2)}s`;
+                renderPlot1();
+                if (state.view.plot3Tab === 'reconstructed') renderPlot3();
+            });
+            document.getElementById('time-pan-slider').addEventListener('input', (e) => {
+                state.view.timePan = parseFloat(e.target.value);
+                renderPlot1();
+                if (state.view.plot3Tab === 'reconstructed') renderPlot3();
+            });
+
+            // Subplot 2 FFT Scale & Overlays
+            document.getElementById('fft-show-filtered').addEventListener('change', (e) => { state.view.fftShowFiltered = e.target.checked; renderPlot2(); });
+            document.getElementById('fft-show-response').addEventListener('change', (e) => { state.view.fftShowResponse = e.target.checked; renderPlot2(); });
+
+            const btnLinear = document.getElementById('btn-fft-linear');
+            const btnDB = document.getElementById('btn-fft-db');
+            btnLinear.addEventListener('click', () => {
+                state.view.fftScale = 'linear';
+                btnLinear.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-300 shadow-sm';
+                btnDB.className = 'px-2 py-0.5 rounded text-[11px] font-medium text-slate-600 dark:text-slate-400';
+                renderPlot2();
+            });
+            btnDB.addEventListener('click', () => {
+                state.view.fftScale = 'db';
+                btnDB.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-300 shadow-sm';
+                btnLinear.className = 'px-2 py-0.5 rounded text-[11px] font-medium text-slate-600 dark:text-slate-400';
+                renderPlot2();
+            });
+
+            // Subplot 3 Tabs
+            document.querySelectorAll('.plot3-tab').forEach(btn => {
+                btn.addEventListener('click', () => switchPlot3Tab(btn.dataset.tab));
+            });
+
+            // Quick Presets in Top Action Bar
+            document.querySelectorAll('.quick-preset-btn').forEach(btn => {
+                btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+            });
+
+            // Responsive Sidebar Toggle (Desktop Collapse + Mobile Drawer)
+            const sidebar = document.getElementById('control-sidebar');
+            const backdrop = document.getElementById('sidebar-backdrop');
+            const btnSidebarToggle = document.getElementById('btn-sidebar-toggle');
+            const btnCloseMobile = document.getElementById('btn-close-mobile-sidebar');
+
+            function toggleSidebar() {
+                const isDesktop = window.innerWidth >= 1024;
+                if (isDesktop) {
+                    sidebar.classList.toggle('sidebar-collapsed');
+                    // Re-render HiDPI canvases after sidebar width transition completes
+                    setTimeout(renderAllPlots, 290);
+                } else {
+                    const isOpen = !sidebar.classList.contains('-translate-x-full');
+                    if (isOpen) {
+                        sidebar.classList.add('-translate-x-full');
+                        backdrop.classList.add('hidden');
+                    } else {
+                        sidebar.classList.remove('-translate-x-full');
+                        backdrop.classList.remove('hidden');
+                    }
+                }
+            }
+
+            btnSidebarToggle.addEventListener('click', toggleSidebar);
+            btnCloseMobile.addEventListener('click', () => {
+                sidebar.classList.add('-translate-x-full');
+                backdrop.classList.add('hidden');
+            });
+            backdrop.addEventListener('click', () => {
+                sidebar.classList.add('-translate-x-full');
+                backdrop.classList.add('hidden');
+            });
+
+            // Accordion Control Groups + Expand All / Collapse All
+            function setAccordionState(headerBtn, expand) {
+                const content = headerBtn.nextElementSibling;
+                headerBtn.setAttribute('aria-expanded', expand ? 'true' : 'false');
+                if (expand) {
+                    content.classList.remove('collapsed');
+                } else {
+                    content.classList.add('collapsed');
+                }
+            }
+
+            document.querySelectorAll('.accordion-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    const isExpanded = header.getAttribute('aria-expanded') === 'true';
+                    setAccordionState(header, !isExpanded);
+                });
+            });
+
+            document.getElementById('btn-expand-all').addEventListener('click', () => {
+                document.querySelectorAll('.accordion-header').forEach(h => setAccordionState(h, true));
+            });
+
+            document.getElementById('btn-collapse-all').addEventListener('click', () => {
+                document.querySelectorAll('.accordion-header').forEach(h => setAccordionState(h, false));
+            });
+
+            // Header Tools: Audio, CSV, PNG, Theme
+            document.getElementById('btn-play-audio').addEventListener('click', toggleAudioPlayback);
+            document.getElementById('btn-export-csv').addEventListener('click', exportCSV);
+            document.getElementById('btn-export-png').addEventListener('click', exportChartsPNG);
+
+            document.getElementById('btn-theme-toggle').addEventListener('click', () => {
+                const html = document.documentElement;
+                const icon = document.getElementById('theme-icon');
+                if (html.classList.contains('dark')) {
+                    html.classList.remove('dark');
+                    icon.className = 'fa-solid fa-moon text-slate-700';
+                } else {
+                    html.classList.add('dark');
+                    icon.className = 'fa-solid fa-sun text-amber-400';
+                }
+                renderAllPlots();
+            });
+
+            // Responsive Resize Handler
+            let resizeTimer;
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(renderAllPlots, 60);
+            });
+
+            // Initial Boot
+            syncUIFromState();
+            runSimulation(true);
+        });
+    </script>
+</body>
+</html>
